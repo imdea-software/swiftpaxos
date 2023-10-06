@@ -1,5 +1,6 @@
 SwiftPaxos
 ==========
+[![Go Report Card](https://goreportcard.com/badge/github.com/imdea-software/swiftpaxos)](https://goreportcard.com/report/github.com/imdea-software/swiftpaxos)
 
 The prototype implementation of SwiftPaxos, a new state machine replication protocol for geo-replication.
 
@@ -62,7 +63,7 @@ Client:
     -run participant
         Run a participant
 
- See [quorum.conf][quorum] and [latency.conf][latency] for the examples of quorum and latency configuration files, respectively.
+ See [quorum.conf][quorum] and [latency.conf][latency] for the examples of quorum and latency configuration files.
 
 [config]: aws.conf
 [epaxos_correct]: https://github.com/otrack/on-epaxos-correctness
