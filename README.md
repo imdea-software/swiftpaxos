@@ -26,7 +26,7 @@ Implemented protocols
 Usage
 -----
 #### participants
-There are three types of participants: *master*, *servers* (also know as *replicas*) and *clients*.
+There are three types of participants: *master*, *servers* and *clients*.
 Master coordinates communications between clients and servers. Servers and clients implement a provided protocol logic.
 
 #### deployment configuration
