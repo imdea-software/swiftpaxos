@@ -6,6 +6,8 @@ The prototype implementation of SwiftPaxos, a new state machine replication prot
 Installation
 ------------
 
+    git clone https://github.com/imdea-software/swiftpaxos.git
+    cd swiftpaxos
     go install github.com/imdea-software/swiftpaxos
 
 Implemented protocols
