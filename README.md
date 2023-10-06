@@ -2,7 +2,8 @@ SwiftPaxos
 ==========
 [![Go Report Card](https://goreportcard.com/badge/github.com/imdea-software/swiftpaxos)](https://goreportcard.com/report/github.com/imdea-software/swiftpaxos)
 
-The prototype implementation of SwiftPaxos, a new state machine replication protocol for geo-replication.
+The prototype implementation of SwiftPaxos, a new state machine
+replication protocol for geo-replication.
 
 Installation
 ------------
@@ -14,11 +15,11 @@ Installation
 Implemented protocols
 ---------------------
 
-|  Name                   | Comments                                         |
-|-------------------------|--------------------------------------------------|
-| SwiftPaxos              | -                                                |
-| Paxos                   | The classic Paxos protocol.                      |
-| N<sup>2</sup>Paxos      | All-to-all variant of Paxos.           |
+|  Protocol               | Comments                                          |
+|-------------------------|---------------------------------------------------|
+| SwiftPaxos              | -                                                 |
+| Paxos                   | The classic Paxos protocol.                       |
+| N<sup>2</sup>Paxos      | All-to-all variant of Paxos.                      |
 | CURP                    | CURP implemented over N<sup>2</sup>Paxos.         |
 | Fast Paxos              | Fast Paxos with uncoordinated collision recovery. |
 | EPaxos                  | A [corrected][epaxos_correct] version of EPaxos.  |
@@ -26,11 +27,13 @@ Implemented protocols
 Usage
 -----
 #### participants
-There are three types of participants: *master*, *servers* and *clients*.
-Master coordinates communications between clients and servers. Servers and clients implement a provided protocol logic.
+There are three types of participants: *master*, *servers* and
+*clients*. Servers and clients implement protocol logic. Master
+coordinates communications between clients and servers.
 
 #### deployment configuration
-To setup their execution, participants read deployment configuration file. See [aws.conf][config] for an example of configuration file.
+To setup their execution, participants read deployment configuration
+file. See [aws.conf][config] for an example of configuration file.
 
 #### launching a participant
 
@@ -63,7 +66,8 @@ Client:
     -run participant
         Run a participant
 
- See [quorum.conf][quorum] and [latency.conf][latency] for the examples of quorum and latency configuration files.
+See [quorum.conf][quorum] and [latency.conf][latency] for the examples
+of quorum and latency configuration files.
 
 [config]: aws.conf
 [epaxos_correct]: https://github.com/otrack/on-epaxos-correctness
