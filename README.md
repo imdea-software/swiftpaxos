@@ -69,7 +69,16 @@ Client:
 See [quorum.conf][quorum] and [latency.conf][latency] for the examples
 of quorum and latency configuration files.
 
+Flint
+-----
+
+To have a better understanding on how different protocols suppose to
+compare to each other we designed a tool called [Flint][flint]. Flint
+computes expected latencies for the selected set of AWS regions and
+estimates the improvement over other protocols.
+
 [config]: aws.conf
 [epaxos_correct]: https://github.com/otrack/on-epaxos-correctness
 [quorum]: quorum.conf
 [latency]: latency.conf
+[flint]: https://github.com/vonaka/flint
