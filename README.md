@@ -17,7 +17,7 @@ Implemented protocols
 
 |  Protocol               | Comments                                          |
 |-------------------------|---------------------------------------------------|
-| SwiftPaxos              | -                                                 |
+| SwiftPaxos              | See NSDI'24 [paper](https://www.usenix.org/conference/nsdi24/presentation/ryabinin) for more details. This is a prototype implementation and some features are not implemented, e.g., rollback on recovery. |
 | Paxos                   | The classic Paxos protocol.                       |
 | N<sup>2</sup>Paxos      | All-to-all variant of Paxos.                      |
 | CURP                    | CURP implemented over N<sup>2</sup>Paxos.         |
