@@ -2,48 +2,28 @@ package com.imdea.sw;
 
 import com.sun.jna.*;
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.Locale;
 
-/**
- * Single-file Java helper that:
- * - extracts the platform native library packaged under /native/<os>-<arch>/ into a temp file and System.load()s it,
- * - binds the Go C-shared exports using JNA,
- * - exposes convenient thin Java wrappers around the exported functions.
- *
- * Usage:
- *  - Place platform native libs in src/main/resources/native/<os>-<arch>/libswiftpaxos.so (or libswiftpaxos.dylib / swiftpaxos.dll)
- *  - Build the JAR (mvn package) to produce jar-with-dependencies under target/
- *  - In other projects include the produced jar; before calling methods, call SwiftPaxos.initNative() once.
- *  - Create clients with newClient(...), then call connect/send/read/disconnect via the returned long handle.
- */
 public final class SwiftPaxos {
-    private SwiftPaxos() {}
-
-    private static final int maxLen = 64 * 1024; // 64 KiB buffer (adjust as needed for expected sizes)
 
     // JNA mapping of the C-exported symbols produced by the Go -buildmode=c-shared wrapper.
     private interface Lib extends Library {
         Lib INSTANCE = Native.load("swiftpaxos", Lib.class);
 
         long Client_New(String server, String maddr, int mport, int fast, int leaderless, int verbose);
-        int Client_Connect(long handle);
+        void Client_Connect(long handle);
         void Client_Disconnect(long handle);
-        int Client_Reconnect(long handle);
+        void Client_Reconnect(long handle);
 
         int Client_SendWrite(long handle, long key, Pointer data, Integer length);
-        int Client_SendRead(long handle, long key, Pointer ptr);
-        int Client_SendScan(long handle, long key, long count, Pointer ptr);
+        int Client_SendRead(long handle, long key, Pointer ptr, int buffSize);
+        int Client_SendScan(long handle, long key, long count, Pointer ptr, int buffSize);
     }
 
     private static volatile boolean nativeLoaded = false;
 
-    /**
-     * Extracts native library for current platform from /native/<os>-<arch>/ and loads it into the process.
-     * Call once before the first native invocation (or rely on lazyLoad()).
-     *
-     * The library file must be present inside the JAR under src/main/resources/native/<os>-<arch>/libswiftpaxos.{so|dylib|dll}
-     */
     public static synchronized void initNative() {
         if (nativeLoaded) return;
         String os = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
@@ -61,8 +41,8 @@ public final class SwiftPaxos {
         }
 
         String archKey;
-        if (arch.contains("amd64") || arch.contains("x86_64")) {
-            archKey = "x86_64";
+        if (arch.contains("amd64") || arch.contains("x86-64")) {
+            archKey = "x86-64";
         } else if (arch.contains("aarch64") || arch.contains("arm64")) {
             archKey = "arm64";
         } else {
@@ -78,7 +58,7 @@ public final class SwiftPaxos {
             libName = "libswiftpaxos.so";
         }
 
-        String resource = "/native/" + osKey + "-" + archKey + "/" + libName;
+        String resource = "/" + osKey + "-" + archKey + "/" + libName;
         try (InputStream in = SwiftPaxos.class.getResourceAsStream(resource)) {
             if (in == null) {
                 // If the user packaged the jar without native libs, we still let JNA attempt loading by name.
@@ -113,30 +93,35 @@ public final class SwiftPaxos {
         return b ? 1 : 0;
     }
 
-    // High-level Java wrappers ------------------------------------------------
+    //
 
-    public static long newClient(String masterAddr, int masterPort, boolean fast, boolean leaderless, boolean verbose) {
+    private final long handle;
+    private final int buffSize;
+    private final ByteBuffer outBuf; // direct buffer
+
+    public SwiftPaxos(int buffSize, String masterAddr, int masterPort, boolean fast, boolean leaderless, boolean verbose) {
+        if (buffSize <= 0) {
+            throw new IllegalArgumentException();
+        }
         ensureLoaded();
-        return Lib.INSTANCE.Client_New("_UNDEFINED_", masterAddr, masterPort, fromBoolean(fast), fromBoolean(leaderless), fromBoolean(verbose));
+        this.handle = Lib.INSTANCE.Client_New("_UNDEFINED_", masterAddr, masterPort, fromBoolean(fast), fromBoolean(leaderless), fromBoolean(verbose));
+        this.buffSize = buffSize;
+        this.outBuf = ByteBuffer.allocateDirect(buffSize);
     }
 
-    public static int connect(long handle) {
-        ensureLoaded();
-        return Lib.INSTANCE.Client_Connect(handle);
+    public void connect() {
+        Lib.INSTANCE.Client_Connect(handle);
     }
 
-    public static void disconnect(long handle) {
-        ensureLoaded();
+    public void disconnect() {
         Lib.INSTANCE.Client_Disconnect(handle);
     }
 
-    public static int reconnect(long handle) {
-        ensureLoaded();
-        return Lib.INSTANCE.Client_Reconnect(handle);
+    public void reconnect() {
+        Lib.INSTANCE.Client_Reconnect(handle);
     }
 
-    public static void write(long handle, long key, byte[] data) {
-        ensureLoaded();
+    public void write(long key, byte[] data) {
         Pointer p = null;
         if (data != null && data.length > 0) {
             p = new Memory(data.length);
@@ -146,18 +131,30 @@ public final class SwiftPaxos {
         Memory.disposeAll();
     }
 
-    public static byte[] read(long handle, long key) {
-        ensureLoaded();
-        Memory outBuf = new Memory(maxLen); // FIXME
-        int len = Lib.INSTANCE.Client_SendRead(handle, key, outBuf);
-        return outBuf.getByteArray(0, len);
+    public byte[] read(long key) {
+        Pointer p = Native.getDirectBufferPointer(outBuf);
+        if (p == null || Pointer.nativeValue(p) == 0) {
+            throw new IllegalStateException("direct buffer has no native pointer");
+        }
+        int len = Lib.INSTANCE.Client_SendRead(handle, key, p, buffSize);
+        if (len < 0) throw new RuntimeException("native error " + len);
+        byte[] out = new byte[len];
+        outBuf.position(0);
+        outBuf.get(out, 0, len);
+        return out;
     }
 
-    public static byte[] scan(long handle, long key, long count) {
-        ensureLoaded();
-        Memory outBuf = new Memory(maxLen); // FIXME
-        int len = Lib.INSTANCE.Client_SendScan(handle, key, count, outBuf);
-        return outBuf.getByteArray(0, len);
+    public byte[] scan(long key, long count) {
+        Pointer p = Native.getDirectBufferPointer(outBuf);
+        if (p == null || Pointer.nativeValue(p) == 0) {
+            throw new IllegalStateException("direct buffer has no native pointer");
+        }
+        int len = Lib.INSTANCE.Client_SendScan(handle, key, count, p, buffSize);
+        if (len < 0) throw new RuntimeException("native error " + len);
+        byte[] out = new byte[len];
+        outBuf.position(0);
+        outBuf.get(out, 0, len);
+        return out;
     }
 
 }

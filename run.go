@@ -21,7 +21,7 @@ import (
 )
 
 func runReplica(c *config.Config, logger *dlog.Logger) {
-	port := 7070
+	port := c.Port
 
 	log.Printf("Server starting on port %d", port)
 	maddr := fmt.Sprintf("%s:%d", c.MasterAddr, c.MasterPort)

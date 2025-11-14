@@ -27,6 +27,7 @@ var (
 	machineType  = flag.String("run", "server", "Run a `participant`, which is either a server (or replica), a client or a master")
 	protocol     = flag.String("protocol", "", "Protocol to run. Overwrites `protocol` field of the config file")
 	quorum       = flag.String("quorum", "", "Quorum config `file`")
+	port         = flag.Int("port", 7070, "Port to run the server on")
 )
 
 func main() {
@@ -64,6 +65,7 @@ func main() {
 	}
 
 	c.Quorum = *quorum
+	c.Port = *port
 
 	run(c)
 }

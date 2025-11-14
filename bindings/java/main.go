@@ -40,6 +40,7 @@ func Client_New(cserver, cmaddr *C.char, cmport C.int, cfast, cleaderless, cverb
 	nextHandle++
 	clients[h] = b
 	mu.Unlock()
+
 	return C.longlong(h)
 }
 
@@ -54,6 +55,7 @@ func Client_Connect(h C.longlong) {
 	if err := cl.Connect(); err != nil {
 		log.Fatal("Cannot connect.")
 	}
+	cl.WaitReplies(cl.LeaderId)
 }
 
 //export Client_Disconnect
@@ -93,7 +95,8 @@ func Client_SendWrite(h C.longlong, key C.longlong, data *C.char, length C.int) 
 }
 
 //export Client_SendRead
-func Client_SendRead(h C.longlong, key C.longlong, outBuf unsafe.Pointer, maxLen C.int) C.int {
+func Client_SendRead(h C.longlong, key C.longlong, outBuff unsafe.Pointer, maxLen C.int) C.int {
+	// fmt.Printf("go pointer received = %p maxLen=%d\n", outBuff, int(maxLen))
 	cl := clients[int64(h)]
 	if cl == nil {
 		log.Fatal("Client does not exist.")
@@ -102,7 +105,7 @@ func Client_SendRead(h C.longlong, key C.longlong, outBuf unsafe.Pointer, maxLen
 	if len(b) > int(maxLen) {
 		log.Fatal("Buffer is too small.")
 	}
-	dst := unsafe.Slice((*byte)(outBuf), int(maxLen))
+	dst := unsafe.Slice((*byte)(outBuff), int(maxLen))
 	copy(dst, b)
 	return C.int(len(b))
 }

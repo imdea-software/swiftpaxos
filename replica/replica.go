@@ -495,7 +495,6 @@ func (r *Replica) clientListener(conn net.Conn) {
 		if msgType, err = reader.ReadByte(); err != nil {
 			break
 		}
-
 		switch uint8(msgType) {
 		case defs.PROPOSE:
 			propose := &defs.Propose{}
