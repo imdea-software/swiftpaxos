@@ -57,6 +57,7 @@ type Config struct {
 
 	Alias       string
 	MachineType Machine
+	Addr        string
 	Port        int
 
 	// associates client/replica alias with the address

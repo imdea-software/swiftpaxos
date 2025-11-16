@@ -210,7 +210,7 @@ func (master *Master) Register(args *defs.RegisterArgs, reply *defs.RegisterRepl
 			master.Printf("node %v [%v] -> %v", index,
 				master.nodeList[index], master.latencies[index])
 		} else {
-			master.Fatal("cannot connect to" + addr)
+			master.Fatal("cannot connect to " + addr + " error: " + err.Error())
 		}
 	}
 

@@ -25,9 +25,12 @@ var (
 	logFile      = flag.String("log", "", "Path to the log `file`")
 	machineAlias = flag.String("alias", "", "An `alias` of this participant")
 	machineType  = flag.String("run", "server", "Run a `participant`, which is either a server (or replica), a client or a master")
+	nservers     = flag.Int("nservers", 0, "Number of replica servers (override the configuration file)")
+	maddr        = flag.String("maddr", "", "Address of the master node (override the configuration file)")
 	protocol     = flag.String("protocol", "", "Protocol to run. Overwrites `protocol` field of the config file")
 	quorum       = flag.String("quorum", "", "Quorum config `file`")
-	port         = flag.Int("port", 7070, "Port to run the server on")
+	port         = flag.Int("port", 7070, "Port to listen clients (for a replica)")
+	addr         = flag.String("addr", "", "IP addr to use for a replica (override the configuration file)") // FIXME
 )
 
 func main() {
@@ -48,6 +51,14 @@ func main() {
 		c.Protocol = *protocol
 	}
 	defs.LatencyConf = *latency
+
+	if *maddr != "" {
+		c.MasterAddr = *maddr
+	}
+
+	if *addr != "" {
+		c.Addr = *addr
+	}
 
 	switch *machineType {
 	case "replica":
@@ -82,7 +93,10 @@ func run(c *config.Config) {
 }
 
 func runMaster(c *config.Config) {
-	m := master.New(len(c.ReplicaAddrs), c.MasterPort, dlog.New(*logFile, true))
+	if *nservers == 0 {
+		*nservers = len(c.ReplicaAddrs)
+	}
+	m := master.New(*nservers, c.MasterPort, dlog.New(*logFile, true))
 	m.Run()
 }
 
