@@ -3,6 +3,7 @@ package paxos
 import (
 	"encoding/binary"
 	"io"
+	"log"
 	"math"
 	"time"
 
@@ -107,6 +108,10 @@ func New(alias string, id int, addrs []string, isLeader bool, f int, conf *confi
 
 	if r.IsLeader {
 		r.BeTheLeader(nil, nil)
+	}
+
+	if r.N == 1 {
+		log.Fatal("N must be greater than 1")
 	}
 
 	for i := 0; i < len(r.defaultBallot); i++ {
@@ -653,7 +658,6 @@ func (r *Replica) handleAcceptReply(areply *AcceptReply) {
 		inst.status = COMMITTED
 		r.recordInstanceMetadata(r.instanceSpace[areply.Instance])
 		r.sync()
-
 		r.bcastCommit(areply.Instance, inst.bal, inst.cmds)
 		if lb.clientProposals != nil && !r.Dreply {
 			for i := 0; i < len(inst.cmds); i++ {
