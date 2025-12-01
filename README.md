@@ -72,6 +72,28 @@ Client:
 
 See [quorum.conf][quorum] and [latency.conf][latency] for an example of quorum and latency configuration files.
 
+Java bindings
+-----
+
+To create them, one simply calls:
+
+	make 
+	
+This compiles and installs the bindings in the local Maven repo (`~/.m2`).
+
+
+Docker support
+-----
+
+Usage is as follows:
+
+	./bin/image.sh # create the image $(whoami)/swiftpawos:latest
+	docker run --rm -e NSERVERS=3 -e TYPE=master $(whoami)/swiftpaxos # launch the master node expecting three servers
+	docker run --rm -e NSERVERS=3 -e TYPE=server -e MADDR=172.17.0.2 $(whoami)/swiftpaxos # create a server
+	docker run --rm -e NSERVERS=3 -e TYPE=server -e MADDR=172.17.0.2 $(whoami)/swiftpaxos	
+	docker run --rm -e NSERVERS=3 -e TYPE=server -e MADDR=172.17.0.2 $(whoami)/swiftpaxos
+	
+
 Flint
 -----
 
