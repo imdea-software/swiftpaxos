@@ -128,7 +128,7 @@ public final class SwiftPaxos {
             p.write(0, data, 0, data.length);
         }
         Lib.INSTANCE.Client_SendWrite(handle, key, p, data == null ? 0 : data.length);
-        Memory.disposeAll();
+        // Memory.disposeAll(); FIXME
     }
 
     public byte[] read(long key) {
