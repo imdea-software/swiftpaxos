@@ -105,10 +105,6 @@ func New(alias string, id int, addrs []string, isLeader bool, f int, conf *confi
 		executedUpTo: -1,
 	}
 
-	if r.IsLeader {
-		r.BeTheLeader(nil, nil)
-	}
-
 	for i := 0; i < len(r.defaultBallot); i++ {
 		r.defaultBallot[i] = -1
 	}

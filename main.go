@@ -82,7 +82,7 @@ func run(c *config.Config) {
 }
 
 func runMaster(c *config.Config) {
-	m := master.New(len(c.ReplicaAddrs), c.MasterPort, dlog.New(*logFile, true))
+	m := master.New(len(c.ReplicaAddrs), c.MasterPort, c, dlog.New(*logFile, true))
 	m.Run()
 }
 

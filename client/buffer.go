@@ -1,7 +1,9 @@
 package client
 
 import (
+	"errors"
 	"math/rand"
+	"net"
 	"sync"
 	"time"
 
@@ -175,7 +177,11 @@ func (c *BufferClient) WaitReplies(waitFrom int) {
 		for {
 			r, err := c.GetReplyFrom(waitFrom)
 			if err != nil {
-				c.Println(err)
+				if errors.Is(err, net.ErrClosed) {
+					c.Println("warning: calling GetReplyFrom after closing connections. Not a big deal")
+				} else {
+					c.Println(err)
+				}
 				break
 			}
 			if r.OK != defs.TRUE {
