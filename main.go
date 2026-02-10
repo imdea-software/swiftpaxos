@@ -29,7 +29,8 @@ var (
 	maddr        = flag.String("maddr", "", "Address of the master node (override the configuration file)")
 	protocol     = flag.String("protocol", "", "Protocol to run. Overwrites `protocol` field of the config file")
 	quorum       = flag.String("quorum", "", "Quorum config `file`")
-	port         = flag.Int("port", 7070, "Port to listen clients (for a replica)")
+	port         = flag.String("port", "", "`Port` to listen clients (for a replica)")
+	leaderAddr   = flag.String("leader", "", "`Address` of the leader")
 	addr         = flag.String("addr", "", "IP addr to use for a replica (override the configuration file)") // FIXME
 )
 
@@ -76,7 +77,14 @@ func main() {
 	}
 
 	c.Quorum = *quorum
-	c.Port = *port
+	if *port != "" {
+		c.Port, _ = strconv.Atoi(*port)
+	}
+
+	if *leaderAddr != "" {
+		l := *leaderAddr
+		c.Leader = &l
+	}
 
 	run(c)
 }
@@ -96,7 +104,7 @@ func runMaster(c *config.Config) {
 	if *nservers == 0 {
 		*nservers = len(c.ReplicaAddrs)
 	}
-	m := master.New(*nservers, c.MasterPort, dlog.New(*logFile, true))
+	m := master.New(*nservers, c.MasterPort, c.Leader, dlog.New(*logFile, true))
 	m.Run()
 }
 

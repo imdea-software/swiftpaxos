@@ -33,9 +33,10 @@ type Master struct {
 	finishInit bool
 	initCond   *sync.Cond
 	nextLeader int
+	leaderAddr *string
 }
 
-func New(N, port int, logger *dlog.Logger) *Master {
+func New(N, port int, leaderAddr *string, logger *dlog.Logger) *Master {
 	master := &Master{
 		Logger: logger,
 
@@ -51,6 +52,7 @@ func New(N, port int, logger *dlog.Logger) *Master {
 		latencies:  make([]float64, N),
 		finishInit: false,
 		nextLeader: -1,
+		leaderAddr: leaderAddr,
 	}
 	master.initCond = sync.NewCond(master.lock)
 	return master
@@ -97,11 +99,18 @@ func (master *Master) run() {
 					master.Fatal("Not today Zurg!")
 				}
 				defs.UpdateBeTheLeaderReply(btlReply)
-				if btlReply.Leader != -1 && btlReply.Leader != int32(i) {
+				leaderI := i
+				if btlReply.Leader != -1 {
+					leaderI = int(btlReply.Leader)
 					master.leader[i] = false
-					master.leader[int(btlReply.Leader)] = true
+					master.leader[leaderI] = true
 				}
 				master.nextLeader = int(btlReply.NextLeader)
+				if leaderI == i {
+					master.Printf("replica %d is the new leader", leaderI)
+				} else if leaderI < i {
+					i = leaderI - 1
+				}
 			}
 			i++
 		}
@@ -138,6 +147,7 @@ func (master *Master) run() {
 				defs.UpdateBeTheLeaderReply(btlReply)
 				leaderI := i
 				if btlReply.Leader != -1 {
+					// TODO: need to set leader[old_leader] to false?
 					leaderI = int(btlReply.Leader)
 				}
 				master.leader[leaderI] = true
@@ -221,17 +231,22 @@ func (master *Master) Register(args *defs.RegisterArgs, reply *defs.RegisterRepl
 		reply.IsLeader = false
 
 		minLatency := math.MaxFloat64
-		leader := 0
+		leader := -1
 
-		for i := 0; i < len(master.leader); i++ {
-			if master.latencies[i] < minLatency {
-				minLatency = master.latencies[i]
-				leader = i
+		if master.leaderAddr != nil {
+			if addrPort == *master.leaderAddr {
+				leader = index
+			}
+		} else {
+			for i := 0; i < len(master.leader); i++ {
+				if master.latencies[i] < minLatency {
+					minLatency = master.latencies[i]
+					leader = i
+				}
 			}
 		}
 
 		if leader == index {
-			master.Printf("replica %d is the new leader", index)
 			master.leader[index] = true
 			reply.IsLeader = true
 		}

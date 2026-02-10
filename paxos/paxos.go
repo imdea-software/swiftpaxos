@@ -106,10 +106,6 @@ func New(alias string, id int, addrs []string, isLeader bool, f int, conf *confi
 		executedUpTo: -1,
 	}
 
-	if r.IsLeader {
-		r.BeTheLeader(nil, nil)
-	}
-
 	if r.N == 1 {
 		log.Fatal("N must be greater than 1")
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -79,13 +80,17 @@ type Config struct {
 	Leaderless bool
 	// replicas send replies directly to clients
 	Fast bool
+	// address of the leader or nil
+	// this is ignored by Swift, as it uses its own quorum configuration file
+	// TODO: it would be better if we could use an alias instead of the address
+	Leader *string
 
 	// -- client info --
 	// number of client requests
 	Reqs int
 	// duration during which a client run
 	RunTime time.Duration
-	// ration of writes
+	// ratio of writes
 	Writes int
 	// conflict ratio
 	Conflicts int
@@ -111,10 +116,13 @@ type Config struct {
 }
 
 func Read(filename, alias string) (*Config, error) {
+	defaultPort := 7070
+
 	c := &Config{
 		ClientAddrs:  make(map[string]string),
 		ReplicaAddrs: make(map[string]string),
 		Alias:        alias,
+		Port:         defaultPort,
 	}
 
 	f, err := os.Open(filename)
@@ -142,7 +150,7 @@ func Read(filename, alias string) (*Config, error) {
 			continue
 		case "--":
 			if len(words) < 2 {
-				return c, Err("", "expecting [Replicas | Clients | Master | Apply | Proxy] after --")
+				return c, Err("", "expecting [Replicas | Clients | Master | Apply | Stop | Proxy] after --")
 			}
 			apply = true
 			readingMaster = false
@@ -162,6 +170,8 @@ func Read(filename, alias string) (*Config, error) {
 				if words[3] != alias {
 					apply = false
 				}
+			case "stop":
+				apply = true
 			case "proxy":
 				c.Proxy = ReadProxyInfo(c, s, "---")
 			}
@@ -176,6 +186,9 @@ func Read(filename, alias string) (*Config, error) {
 			switch strings.Split(words[0], ":")[0] {
 			case "masterport":
 				c.MasterPort, err = expectInt(words)
+				ok = true
+			case "port":
+				c.Port, err = expectInt(words)
 				ok = true
 			case "reqs":
 				c.Reqs, err = expectInt(words)
@@ -209,6 +222,13 @@ func Read(filename, alias string) (*Config, error) {
 				ok = true
 			case "leaderless":
 				c.Leaderless, err = expectBool(words)
+				ok = true
+			case "leader":
+				leader, readErr := expectString(words)
+				c.Leader, err = &leader, readErr
+				if !strings.Contains(*c.Leader, ":") {
+					*c.Leader = fmt.Sprintf("%s:%d", *c.Leader, defaultPort)
+				}
 				ok = true
 			case "fast":
 				c.Fast, err = expectBool(words)
