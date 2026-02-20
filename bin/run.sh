@@ -19,6 +19,8 @@ if [ "${TYPE}" == "" ]; then
     ALIAS
     MADDR 
     NSERVERS
+    PROTOCOL
+    THRIFTY
     "
     exit 0
 fi
@@ -34,7 +36,7 @@ fi
 
 if [ "${TYPE}" == "server" ]; then
     echo "server mode: ${args}"
-    args="-run server -config ${CONFIG} -nservers ${NSERVERS} -maddr ${MADDR} -addr ${ADDR} -alias ${ADDR}"
+    args="-run server -config ${CONFIG} -protocol ${PROTOCOL} -thrifty ${THRIFTY} -nservers ${NSERVERS} -maddr ${MADDR} -addr ${ADDR} -alias ${ADDR}"
     ${DIR}/swiftpaxos ${args} &
 fi
 

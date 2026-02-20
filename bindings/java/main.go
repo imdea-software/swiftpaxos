@@ -55,7 +55,11 @@ func Client_Connect(h C.longlong) {
 	if err := cl.Connect(); err != nil {
 		log.Fatal("Cannot connect.")
 	}
-	cl.WaitReplies(cl.LeaderId)
+	if !cl.Leaderless {
+		cl.WaitReplies(cl.ClosestId)
+	} else {
+		cl.WaitReplies(cl.LeaderId)
+	}
 }
 
 //export Client_Disconnect

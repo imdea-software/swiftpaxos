@@ -28,7 +28,8 @@ var (
 	nservers     = flag.Int("nservers", 0, "Number of replica servers (override the configuration file)")
 	maddr        = flag.String("maddr", "", "Address of the master node (override the configuration file)")
 	protocol     = flag.String("protocol", "", "Protocol to run. Overwrites `protocol` field of the config file")
-	quorum       = flag.String("quorum", "", "Quorum config `file`")
+	thrifty      = flag.String("thrifty", "", "Use the thrifty variation of the protocol)")
+	quorum       = flag.String("quorum", "", "Quorum config `file`")	
 	port         = flag.String("port", "", "`Port` to listen clients (for a replica)")
 	leaderAddr   = flag.String("leader", "", "`Address` of the leader")
 	addr         = flag.String("addr", "", "IP addr to use for a replica (override the configuration file)") // FIXME
@@ -61,6 +62,10 @@ func main() {
 		c.Addr = *addr
 	}
 
+	if *thrifty != "" {
+		c.Thrifty,_ = strconv.ParseBool(*thrifty)
+	}
+	
 	switch *machineType {
 	case "replica":
 		fallthrough

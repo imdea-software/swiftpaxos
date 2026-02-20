@@ -94,6 +94,7 @@ func (master *Master) run() {
 		} else {
 			btlReply := defs.NewBeTheLeaderReply()
 			if master.leader[i] {
+				master.Printf("Asking replica %d to be new leader", i)
 				err = master.nodes[i].Call("Replica.BeTheLeader", &defs.BeTheLeaderArgs{}, btlReply)
 				if err != nil {
 					master.Fatal("Not today Zurg!")
