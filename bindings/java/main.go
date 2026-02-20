@@ -55,7 +55,7 @@ func Client_Connect(h C.longlong) {
 	if err := cl.Connect(); err != nil {
 		log.Fatal("Cannot connect.")
 	}
-	if !cl.Leaderless {
+	if cl.Leaderless {
 		cl.WaitReplies(cl.ClosestId)
 	} else {
 		cl.WaitReplies(cl.LeaderId)
