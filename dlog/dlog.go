@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"fmt"
 	"log"
 	"os"
 )
@@ -26,6 +27,7 @@ type Logger struct {
 
 func New(logPath string, verbose bool) *Logger {
 	logF := os.Stdout
+	fmt.Println("Logging:path " + logPath)
 	if logPath != "" {
 		var err error
 		logF, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY, 0644)
