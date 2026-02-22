@@ -108,6 +108,7 @@ func (c *Client) Connect() error {
 
 	if !c.Leaderless {
 		c.Println("getting leader from master...")
+		c.Println("getting leader from master...")
 		gl, err := c.callMaster("GetLeader")
 		if err != nil {
 			return err
