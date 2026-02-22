@@ -34,7 +34,7 @@ func Client_New(cserver, cmaddr *C.char, cmport C.int, cfast, cleaderless, cverb
 	leaderless := goBool(cleaderless)
 	verbose := goBool(cverbose)
 
-	cl := client.NewClientLog(server, maddr, mport, fast, leaderless, verbose, dlog.New("/tmp/log", true))
+	cl := client.NewClientLog(server, maddr, mport, fast, leaderless, verbose, dlog.New("/tmp/log", verbose))
 	b := client.NewBufferClient(cl, 0, 0, 0, 0, 0)
 
 	mu.Lock()
