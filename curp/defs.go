@@ -130,28 +130,31 @@ func (m *MSyncReply) New() fastrpc.Serializable {
 type CommunicationSupply struct {
 	maxLatency time.Duration
 
-	replyChan     chan fastrpc.Serializable
-	acceptChan    chan fastrpc.Serializable
-	acceptAckChan chan fastrpc.Serializable
-	aacksChan     chan fastrpc.Serializable
-	recordAckChan chan fastrpc.Serializable
-	commitChan    chan fastrpc.Serializable
-	syncChan      chan fastrpc.Serializable
-	syncReplyChan chan fastrpc.Serializable
+	replicaProposeChan chan fastrpc.Serializable
+	replyChan          chan fastrpc.Serializable
+	acceptChan         chan fastrpc.Serializable
+	acceptAckChan      chan fastrpc.Serializable
+	aacksChan          chan fastrpc.Serializable
+	recordAckChan      chan fastrpc.Serializable
+	commitChan         chan fastrpc.Serializable
+	syncChan           chan fastrpc.Serializable
+	syncReplyChan      chan fastrpc.Serializable
 
-	replyRPC     uint8
-	acceptRPC    uint8
-	acceptAckRPC uint8
-	aacksRPC     uint8
-	recordAckRPC uint8
-	commitRPC    uint8
-	syncRPC      uint8
-	syncReplyRPC uint8
+	replicaProposeRPC uint8
+	replyRPC          uint8
+	acceptRPC         uint8
+	acceptAckRPC      uint8
+	aacksRPC          uint8
+	recordAckRPC      uint8
+	commitRPC         uint8
+	syncRPC           uint8
+	syncReplyRPC      uint8
 }
 
 func initCs(cs *CommunicationSupply, t *fastrpc.Table) {
 	cs.maxLatency = 0
 
+	cs.replicaProposeChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
 	cs.replyChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
 	cs.acceptChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
 	cs.acceptAckChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
@@ -161,6 +164,7 @@ func initCs(cs *CommunicationSupply, t *fastrpc.Table) {
 	cs.syncChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
 	cs.syncReplyChan = make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE)
 
+	cs.replicaProposeRPC = t.Register(new(defs.Propose), cs.replicaProposeChan)
 	cs.replyRPC = t.Register(new(MReply), cs.replyChan)
 	cs.acceptRPC = t.Register(new(MAccept), cs.acceptChan)
 	cs.acceptAckRPC = t.Register(new(MAcceptAck), cs.acceptAckChan)
@@ -169,6 +173,8 @@ func initCs(cs *CommunicationSupply, t *fastrpc.Table) {
 	cs.commitRPC = t.Register(new(MCommit), cs.commitChan)
 	cs.syncRPC = t.Register(new(MSync), cs.syncChan)
 	cs.syncReplyRPC = t.Register(new(MSyncReply), cs.syncReplyChan)
+
+	fmt.Println(cs.replicaProposeRPC, cs.syncReplyRPC)
 }
 
 type byteReader interface {

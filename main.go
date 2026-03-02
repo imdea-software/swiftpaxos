@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/imdea-software/swiftpaxos/client"
 	"github.com/imdea-software/swiftpaxos/config"
-	"github.com/imdea-software/swiftpaxos/curp"
 	"github.com/imdea-software/swiftpaxos/dlog"
 	"github.com/imdea-software/swiftpaxos/master"
 	"github.com/imdea-software/swiftpaxos/replica/defs"
@@ -29,7 +27,7 @@ var (
 	maddr        = flag.String("maddr", "", "Address of the master node (override the configuration file)")
 	protocol     = flag.String("protocol", "", "Protocol to run. Overwrites `protocol` field of the config file")
 	thrifty      = flag.String("thrifty", "", "Use the thrifty variation of the protocol)")
-	quorum       = flag.String("quorum", "", "Quorum config `file`")	
+	quorum       = flag.String("quorum", "", "Quorum config `file`")
 	port         = flag.String("port", "", "`Port` to listen clients (for a replica)")
 	leaderAddr   = flag.String("leader", "", "`Address` of the leader")
 	addr         = flag.String("addr", "", "IP addr to use for a replica (override the configuration file)") // FIXME
@@ -63,9 +61,9 @@ func main() {
 	}
 
 	if *thrifty != "" {
-		c.Thrifty,_ = strconv.ParseBool(*thrifty)
+		c.Thrifty, _ = strconv.ParseBool(*thrifty)
 	}
-	
+
 	switch *machineType {
 	case "replica":
 		fallthrough
@@ -140,9 +138,12 @@ func runSingleClient(c *config.Config, i int, verbose bool) {
 
 	switch strings.ToLower(c.Protocol) {
 	case "swiftpaxos":
-	case "curp":
 	case "fastpaxos":
 		c.Fast = true
+		c.WaitClosest = true
+	case "curp":
+		c.Fast = false
+		c.Leaderless = true
 		c.WaitClosest = true
 	case "n2paxos":
 		c.Fast = true
@@ -167,25 +168,6 @@ func runSingleClient(c *config.Config, i int, verbose bool) {
 	}
 	if p := strings.ToLower(c.Protocol); p == "swiftpaxos" {
 		cl := swift.NewClient(b, len(c.ReplicaAddrs))
-		if cl == nil {
-			return
-		}
-		cl.Loop()
-	} else if p == "curp" {
-		cls := []string{}
-		for a := range c.ClientAddrs {
-			cls = append(cls, a)
-		}
-		sort.Slice(cls, func(i, j int) bool {
-			return cls[i] < cls[j]
-		})
-		pclients := 0
-		for i, a := range cls {
-			if a == c.Alias {
-				pclients = (c.Clones + 1) * i
-			}
-		}
-		cl := curp.NewClient(b, len(c.ReplicaAddrs), c.Reqs, pclients)
 		if cl == nil {
 			return
 		}

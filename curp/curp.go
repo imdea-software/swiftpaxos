@@ -17,6 +17,8 @@ import (
 type Replica struct {
 	*replica.Replica
 
+	vclient *VirtualClient
+
 	ballot  int32
 	cballot int32
 	status  int
@@ -38,6 +40,7 @@ type Replica struct {
 	executed  cmap.ConcurrentMap
 	committed cmap.ConcurrentMap
 	delivered cmap.ConcurrentMap
+	rIds      cmap.ConcurrentMap
 
 	sender  replica.Sender
 	batcher *Batcher
@@ -108,6 +111,7 @@ func New(alias string, rid int, addrs []string, exec bool, pl, f int,
 		executed:  cmap.New(),
 		committed: cmap.New(),
 		delivered: cmap.New(),
+		rIds:      cmap.New(),
 		history:   make([]commandStaticDesc, HISTORY_SIZE),
 
 		deliverChan: make(chan int, defs.CHAN_BUFFER_SIZE),
@@ -121,6 +125,8 @@ func New(alias string, rid int, addrs []string, exec bool, pl, f int,
 			},
 		},
 	}
+
+	r.vclient = NewVirtualClient(r)
 
 	r.Q = replica.NewMajorityOf(r.N)
 	r.sender = replica.NewSender(r.Replica)
@@ -174,7 +180,14 @@ func (r *Replica) run() {
 		case int := <-r.deliverChan:
 			r.getCmdDesc(int, "deliver", -1)
 
-		case propose := <-r.ProposeChan:
+		case realProposal := <-r.ProposeChan:
+			r.vclient.propose(realProposal)
+
+		case pr := <-r.cs.replicaProposeChan:
+			propose := &defs.GPropose{
+				Propose: pr.(*defs.Propose),
+			}
+
 			if r.isLeader {
 				dep := r.leaderUnsync(propose.Command, r.lastCmdSlot)
 				desc := r.getCmdDescSeq(r.lastCmdSlot, propose, dep, true) // why Seq?
@@ -190,13 +203,21 @@ func (r *Replica) run() {
 					continue
 				}
 				r.proposes.Set(cmdId.String(), propose)
+				r.rIds.Set(cmdId.String(), int32(propose.Timestamp))
 				recAck := &MRecordAck{
 					Replica: r.Id,
 					Ballot:  r.ballot,
 					CmdId:   cmdId,
 					Ok:      r.ok(propose.Command),
 				}
-				r.sender.SendToClient(propose.ClientId, recAck, r.cs.recordAckRPC)
+
+				rId := int32(propose.Timestamp)
+				if rId != r.Id {
+					r.sender.SendTo(rId, recAck, r.cs.recordAckRPC)
+				} else {
+					r.cs.recordAckChan <- recAck
+				}
+
 				r.unsync(propose.Command)
 				slot, exists := r.slots[cmdId]
 				if exists {
@@ -245,8 +266,29 @@ func (r *Replica) run() {
 					CmdId:   sync.CmdId,
 					Rep:     val.([]byte),
 				}
-				r.sender.SendToClient(sync.CmdId.ClientId, rep, r.cs.syncReplyRPC)
+				if rIdi, exists := r.rIds.Get(sync.CmdId.String()); exists {
+					rId := rIdi.(int32)
+					if rId != r.Id {
+						r.sender.SendTo(rId, rep, r.cs.syncReplyRPC)
+
+					} else {
+						r.cs.syncReplyChan <- rep
+					}
+				}
 			}
+
+		// Virtual Client
+		case m := <-r.cs.replyChan:
+			rep := m.(*MReply)
+			r.vclient.handleReply(rep)
+
+		case m := <-r.cs.recordAckChan:
+			recAck := m.(*MRecordAck)
+			r.vclient.handleRecordAck(recAck, false)
+
+		case m := <-r.cs.syncReplyChan:
+			rep := m.(*MSyncReply)
+			r.vclient.handleSyncReply(rep)
 		}
 	}
 }
@@ -312,17 +354,21 @@ func (r *Replica) handleAccept(msg *MAccept, desc *commandDesc) {
 		}
 
 		if r.contactClients && !r.isLeader {
-			prop, exists := r.proposes.Get(desc.cmdId.String())
+			_, exists := r.proposes.Get(desc.cmdId.String())
 			if exists { // or if desc.propose != nil ?
 				r.IfPreviousAreReady(desc, func() {
-					propose := prop.(*defs.GPropose)
 					recAck := &MRecordAck{
 						Replica: r.Id,
 						Ballot:  r.ballot,
 						CmdId:   desc.cmdId,
 						Ok:      ORDERED,
 					}
-					r.sender.SendToClient(propose.ClientId, recAck, r.cs.recordAckRPC)
+					rId := int32(desc.propose.Timestamp)
+					if rId != r.Id {
+						r.sender.SendTo(rId, recAck, r.cs.recordAckRPC)
+					} else {
+						r.cs.recordAckChan <- recAck
+					}
 				})
 			}
 		}
@@ -497,38 +543,39 @@ func (r *Replica) deliver(desc *commandDesc, slot int) {
 		}
 
 		if r.isLeader && desc.phase != COMMIT {
+			var val []byte
+			if vlen := len(desc.val); vlen > 0 {
+				val = make([]byte, vlen)
+				copy(val, desc.val)
+			} else {
+				val = make([]byte, 1)
+			}
 			rep := &MReply{
 				Replica: r.Id,
 				Ballot:  r.ballot,
 				CmdId:   desc.cmdId,
-				Rep:     desc.val,
+				Rep:     val,
 			}
 			if desc.dep != -1 && !r.committed.Has(strconv.Itoa(desc.dep)) {
 				rep.Ok = FALSE
 			} else {
 				rep.Ok = TRUE
 			}
-			if rep.Ok == TRUE || r.contactClients {
+			if rep.Ok == TRUE {
 				// if !r.contactClients then the client gets reply
 				// from the leader or the closes replica after the command
 				// gets committed and executed
-				r.sender.SendToClient(desc.propose.ClientId, rep, r.cs.replyRPC)
+				rId := int32(desc.propose.Timestamp)
+				if rId != r.Id {
+					r.sender.SendTo(rId, rep, r.cs.replyRPC)
+				} else {
+					r.cs.replyChan <- rep
+				}
 			}
 		}
 
 		if desc.phase == COMMIT {
-			if !r.contactClients {
-				if (r.optimized && desc.propose.Proxy) ||
-					(!r.optimized && r.isLeader) {
-					rep := &MSyncReply{
-						Replica: r.Id,
-						Ballot:  r.ballot,
-						CmdId:   desc.cmdId,
-						Rep:     desc.val,
-					}
-					r.sender.SendToClient(desc.propose.ClientId, rep, r.cs.syncReplyRPC)
-				}
-			}
+			r.vclient.deliver(desc.cmdId, desc.val)
 			desc.msgs <- slot
 			r.delivered.Set(strconv.Itoa(slot), struct{}{})
 			if desc.seq {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 
+	fastrpc "github.com/imdea-software/swiftpaxos/rpc"
 	"github.com/imdea-software/swiftpaxos/state"
 )
 
@@ -136,6 +137,10 @@ var (
 	Storage      = ""
 	StoreFilname = "stable_store"
 )
+
+func (m *Propose) New() fastrpc.Serializable {
+	return new(Propose)
+}
 
 func NewBeTheLeaderReply() *BeTheLeaderReply {
 	return &BeTheLeaderReply{
