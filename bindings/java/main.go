@@ -6,8 +6,6 @@ package main
 import "C"
 import (
 	"log"
-
-	"github.com/imdea-software/swiftpaxos/dlog"
 )
 
 import (
@@ -34,7 +32,7 @@ func Client_New(cserver, cmaddr *C.char, cmport C.int, cfast, cleaderless, cverb
 	leaderless := goBool(cleaderless)
 	verbose := goBool(cverbose)
 
-	cl := client.NewClientLog(server, maddr, mport, fast, leaderless, verbose, dlog.New("/tmp/log", verbose))
+	cl := client.NewClientLog(server, maddr, mport, fast, leaderless, verbose, nil)
 	b := client.NewBufferClient(cl, 0, 0, 0, 0, 0)
 
 	mu.Lock()

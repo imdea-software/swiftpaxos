@@ -23,15 +23,15 @@ import (
 func runReplica(c *config.Config, logger *dlog.Logger) {
 	port := c.Port
 
-	log.Printf("Server starting on port %d", port)
+	log.Println("Server starting on port %d", port)
 	maddr := fmt.Sprintf("%s:%d", c.MasterAddr, c.MasterPort)
 	addr := c.Addr
 	if c.Addr == "" {
 		addr = c.ReplicaAddrs[c.Alias]
 	}
 	replicaId, nodeList, isLeader := registerWithMaster(addr, maddr, port)
-	f := (len(c.ReplicaAddrs) - 1) / 2
-	log.Printf("Tolerating %d max. failures", f)
+	f := (len(nodeList) - 1) / 2
+	log.Printf("Tolerating %d max. failures\n", f)
 
 	switch strings.ToLower(c.Protocol) {
 	case "swiftpaxos":
@@ -60,7 +60,7 @@ func runReplica(c *config.Config, logger *dlog.Logger) {
 		rpc.Register(rep)
 	case "epaxos":
 		log.Println("Starting EPaxos replica...")
-		rep := epaxos.New(c.Alias, replicaId, nodeList, !c.Noop, false, false, 0, false, f, c, logger)
+		rep := epaxos.New(c.Alias, replicaId, nodeList, !c.Noop, true, false, 0, false, f, c, logger)
 		rpc.Register(rep)
 	}
 
