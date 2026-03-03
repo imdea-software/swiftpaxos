@@ -247,7 +247,9 @@ func (r *Replica) fastClock() {
 func (r *Replica) slowClock() {
 	for !r.Shutdown {
 		time.Sleep(500 * time.Millisecond)
+		r.M.Lock()
 		r.Printf("weird %d; conflicted %d; slow %d; fast %d\n", r.Stats.M["weird"], r.Stats.M["conflicted"], r.Stats.M["slow"], r.Stats.M["fast"])
+		r.M.Unlock()
 		slowClockChan <- true
 	}
 }
