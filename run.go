@@ -33,33 +33,28 @@ func runReplica(c *config.Config, logger *dlog.Logger) {
 	f := (len(nodeList) - 1) / 2
 	log.Printf("Tolerating %d max. failures\n", f)
 
+	log.Printf("Starting %s replica... Config: %+v\n", strings.ToLower(c.Protocol), c)
 	switch strings.ToLower(c.Protocol) {
 	case "swiftpaxos":
-		log.Println("Starting SwiftPaxos replica...")
 		swift.MaxDescRoutines = 100
 		rep := swift.New(c.Alias, replicaId, nodeList, !c.Noop,
 			c.Optread, true, false, 1, f, c, logger, nil)
 		rpc.Register(rep)
 	case "curp":
-		log.Println("Starting optimized CURP replica...")
 		curp.MaxDescRoutines = 100
 		rep := curp.New(c.Alias, replicaId, nodeList, !c.Noop,
 			1, f, true, c, logger)
 		rpc.Register(rep)
 	case "fastpaxos":
-		log.Println("Starting Fast Paxos replica...")
 		rep := fastpaxos.New(c.Alias, replicaId, nodeList, !c.Noop, f, c, logger)
 		rpc.Register(rep)
 	case "n2paxos":
-		log.Println("Starting N²Paxos replica...")
 		rep := n2paxos.New(c.Alias, replicaId, nodeList, !c.Noop, 1, f, c, logger)
 		rpc.Register(rep)
 	case "paxos":
-		log.Println("Starting Paxos replica...")
 		rep := paxos.New(c.Alias, replicaId, nodeList, isLeader, f, c, logger)
 		rpc.Register(rep)
 	case "epaxos":
-		log.Println("Starting EPaxos replica...")
 		rep := epaxos.New(c.Alias, replicaId, nodeList, !c.Noop, false, false, 0, false, f, c, logger)
 		rpc.Register(rep)
 	}
