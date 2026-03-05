@@ -133,7 +133,7 @@ type LeaderBookkeeping struct {
 
 func New(alias string, id int, peerAddrList []string, exec, beacon, durable bool, batchWait int, transconf bool, failures int, conf *config.Config, logger *dlog.Logger) *Replica {
 	r := &Replica{
-		replica.New(alias, id, failures, peerAddrList, true, exec, false, conf, logger),
+		replica.New(alias, id, failures, peerAddrList, false, exec, false, conf, logger),
 		make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE),
 		make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE),
 		make(chan fastrpc.Serializable, defs.CHAN_BUFFER_SIZE),
