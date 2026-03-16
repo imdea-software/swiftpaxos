@@ -1,0 +1,4 @@
+bin/
+pkg/
+bindings/java/target/
+bindings/java/src/main/resources/linux-x86-64/
