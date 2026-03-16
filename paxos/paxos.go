@@ -22,6 +22,8 @@ const FALSE = uint8(0)
 const COMMIT_GRACE_PERIOD = 3 * 1e9 // 3 second(s)
 const SLEEP_TIME_NS = 1e6
 
+const SNAPSHOT_POINT = int32(100000)
+
 type Replica struct {
 	*replica.Replica
 	prepareChan           chan fastrpc.Serializable
@@ -664,6 +666,7 @@ func (r *Replica) handleAcceptReply(areply *AcceptReply) {
 					lb.clientProposals[i].Timestamp}
 				r.ReplyProposeTS(propreply, lb.clientProposals[i].Reply, lb.clientProposals[i].Mutex)
 			}
+			lb.clientProposals = nil
 		}
 	}
 }
@@ -713,6 +716,9 @@ func (r *Replica) executeCommands() {
 				}
 				executed = true
 				r.executedUpTo++
+				if r.executedUpTo >= SNAPSHOT_POINT {
+					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT] = nil
+				}
 			} else {
 				if i == problemInstance {
 					timeout += SLEEP_TIME_NS
