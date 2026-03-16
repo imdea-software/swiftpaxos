@@ -485,6 +485,10 @@ func (r *Replica) handleAccept(accept *Accept) {
 }
 
 func (r *Replica) handleCommit(commit *Commit) {
+	if commit.Instance <= r.executedUpTo {
+		return
+	}
+
 	inst := r.instanceSpace[commit.Instance]
 	if inst == nil {
 		if commit.Instance > r.crtInstance {
@@ -524,6 +528,10 @@ func (r *Replica) handleCommit(commit *Commit) {
 }
 
 func (r *Replica) handleCommitShort(commit *CommitShort) {
+	if commit.Instance <= r.executedUpTo {
+		return
+	}
+
 	inst := r.instanceSpace[commit.Instance]
 	if inst == nil {
 		return
@@ -544,6 +552,10 @@ func (r *Replica) handleCommitShort(commit *CommitShort) {
 }
 
 func (r *Replica) handlePrepareReply(preply *PrepareReply) {
+	if preply.Instance < r.executedUpTo {
+		return
+	}
+
 	inst := r.instanceSpace[preply.Instance]
 	lb := r.instanceSpace[preply.Instance].lb
 
@@ -624,6 +636,10 @@ func (r *Replica) handlePrepareReply(preply *PrepareReply) {
 }
 
 func (r *Replica) handleAcceptReply(areply *AcceptReply) {
+	if areply.Instance < r.executedUpTo {
+		return
+	}
+
 	inst := r.instanceSpace[areply.Instance]
 	lb := r.instanceSpace[areply.Instance].lb
 
@@ -716,9 +732,13 @@ func (r *Replica) executeCommands() {
 				}
 				executed = true
 				r.executedUpTo++
+				r.M.Lock()
 				if r.executedUpTo >= SNAPSHOT_POINT {
+					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT].lb.clientProposals = nil
+					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT].lb = nil
 					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT] = nil
 				}
+				r.M.Unlock()
 			} else {
 				if i == problemInstance {
 					timeout += SLEEP_TIME_NS
