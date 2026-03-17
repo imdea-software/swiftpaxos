@@ -22,7 +22,7 @@ const FALSE = uint8(0)
 const COMMIT_GRACE_PERIOD = 3 * 1e9 // 3 second(s)
 const SLEEP_TIME_NS = 1e6
 
-const SNAPSHOT_POINT = int32(100000)
+const SNAPSHOT_POINT = int32(1000000)
 
 type Replica struct {
 	*replica.Replica
@@ -254,6 +254,7 @@ func (r *Replica) run() {
 			break
 
 		case iid := <-r.instancesToRecover:
+			dlog.Printf("recovering %d", iid)
 			r.recover(iid)
 			break
 		}
@@ -345,14 +346,14 @@ func (r *Replica) bcastCommit(instance int32, ballot int32, command []state.Comm
 	pcs.Instance = instance
 	pcs.Ballot = ballot
 	pcs.Count = int32(len(command))
-	argsShort := &pcs
+	// argsShort := &pcs
 
 	sent := 0
 	for q := 0; q < r.N-1; q++ {
 		if !r.Alive[r.PreferredPeerOrder[q]] {
 			continue
 		}
-		r.SendMsg(r.PreferredPeerOrder[q], r.commitShortRPC, argsShort)
+		r.SendMsg(r.PreferredPeerOrder[q], r.commitRPC, &pc)
 		sent++
 	}
 
@@ -485,11 +486,8 @@ func (r *Replica) handleAccept(accept *Accept) {
 }
 
 func (r *Replica) handleCommit(commit *Commit) {
-	if commit.Instance <= r.executedUpTo {
-		return
-	}
-
 	inst := r.instanceSpace[commit.Instance]
+	dlog.Printf("Committing %d", commit.Instance)
 	if inst == nil {
 		if commit.Instance > r.crtInstance {
 			r.crtInstance = commit.Instance
@@ -520,6 +518,9 @@ func (r *Replica) handleCommit(commit *Commit) {
 	}
 
 	inst.cmds = commit.Command
+	if inst.cmds == nil {
+		r.Fatal("Commands is nil!\n")
+	}
 	inst.bal = commit.Ballot
 	inst.vbal = commit.Ballot
 	inst.status = COMMITTED
@@ -528,11 +529,8 @@ func (r *Replica) handleCommit(commit *Commit) {
 }
 
 func (r *Replica) handleCommitShort(commit *CommitShort) {
-	if commit.Instance <= r.executedUpTo {
-		return
-	}
-
 	inst := r.instanceSpace[commit.Instance]
+	dlog.Printf("Committing (short) %d", commit.Instance)
 	if inst == nil {
 		return
 	}
@@ -552,10 +550,6 @@ func (r *Replica) handleCommitShort(commit *CommitShort) {
 }
 
 func (r *Replica) handlePrepareReply(preply *PrepareReply) {
-	if preply.Instance < r.executedUpTo {
-		return
-	}
-
 	inst := r.instanceSpace[preply.Instance]
 	lb := r.instanceSpace[preply.Instance].lb
 
@@ -636,10 +630,6 @@ func (r *Replica) handlePrepareReply(preply *PrepareReply) {
 }
 
 func (r *Replica) handleAcceptReply(areply *AcceptReply) {
-	if areply.Instance < r.executedUpTo {
-		return
-	}
-
 	inst := r.instanceSpace[areply.Instance]
 	lb := r.instanceSpace[areply.Instance].lb
 
@@ -682,7 +672,6 @@ func (r *Replica) handleAcceptReply(areply *AcceptReply) {
 					lb.clientProposals[i].Timestamp}
 				r.ReplyProposeTS(propreply, lb.clientProposals[i].Reply, lb.clientProposals[i].Mutex)
 			}
-			lb.clientProposals = nil
 		}
 	}
 }
@@ -716,6 +705,7 @@ func (r *Replica) executeCommands() {
 		// FIXME idempotence
 		for i := r.executedUpTo + 1; i <= r.crtInstance; i++ {
 			inst := r.instanceSpace[i]
+			// dlog.Println(i, "=>", inst)
 			if inst != nil && inst.cmds != nil && inst.status == COMMITTED {
 				for j := 0; j < len(inst.cmds); j++ {
 					if r.Dreply && inst.lb != nil && inst.lb.clientProposals != nil {
@@ -760,6 +750,8 @@ func (r *Replica) executeCommands() {
 			r.M.Lock()
 			r.M.Unlock() // FIXME for cache coherence
 			time.Sleep(SLEEP_TIME_NS)
+			// dlog.Printf("executedUpTo: %d, propose: %d, prepare: %d, accept: %d commit: %d, commitShort: %d",
+			//	r.executedUpTo, len(r.ProposeChan), len(r.prepareChan), len(r.acceptChan), len(r.commitChan), len(r.commitShortChan))
 		}
 	}
 }
