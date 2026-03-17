@@ -734,7 +734,6 @@ func (r *Replica) executeCommands() {
 				r.executedUpTo++
 				r.M.Lock()
 				if r.executedUpTo >= SNAPSHOT_POINT {
-					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT].lb.clientProposals = nil
 					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT].lb = nil
 					r.instanceSpace[r.executedUpTo-SNAPSHOT_POINT] = nil
 				}
