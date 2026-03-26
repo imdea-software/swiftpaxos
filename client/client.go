@@ -94,7 +94,7 @@ func (c *Client) Connect() error {
 	c.replicas = masterReply.ReplicaList
 
 	dlog.Printf("searching for the closest replica...")
-	!err = c.findClosest(masterReply.AliveList)
+	err = c.findClosest(masterReply.AliveList)
 	if err != nil {
 		dlog.Printf("Cannot find closest replica: %v", err)
 		return err
