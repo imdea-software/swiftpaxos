@@ -86,6 +86,7 @@ func (c *Client) Connect() error {
 	c.Println("getting list of replicas...")
 	rl, err := c.callMaster("GetReplicaList")
 	if err != nil {
+		dlog.Printf("Cannot get replica list: %v", err)
 		return err
 	}
 	masterReply := rl.(*defs.GetReplicaListReply)
