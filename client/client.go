@@ -77,13 +77,13 @@ func NewClientLog(server, maddr string, mport int, fast, leaderless, verbose boo
 }
 
 func (c *Client) Connect() error {
-	c.Println("dialing master...")
+	c.Printf("dialing master...")
 	_, err := c.dialMaster()
 	if err != nil {
 		return err
 	}
 
-	c.Println("getting list of replicas...")
+	c.Printf("getting list of replicas...")
 	rl, err := c.callMaster("GetReplicaList")
 	if err != nil {
 		dlog.Printf("Cannot get replica list: %v", err)
@@ -92,14 +92,14 @@ func (c *Client) Connect() error {
 	masterReply := rl.(*defs.GetReplicaListReply)
 	c.replicas = masterReply.ReplicaList
 
-	c.Println("searching for the closest replica...")
+	c.Printf("searching for the closest replica...")
 	err = c.findClosest(masterReply.AliveList)
 	if err != nil {
 		dlog.Printf("Cannot find closest replica: %v", err)
 		return err
 	}
-	c.Println("replicas", c.replicas)
-	c.Println("closest (alive)", c.ClosestId)
+	c.Printf("replicas: %s", c.replicas)
+	c.Printf("closest alive: %s", c.ClosestId)
 
 	c.dt = defs.NewLatencyTable(defs.LatencyConf, defs.IP(), c.replicas)
 
