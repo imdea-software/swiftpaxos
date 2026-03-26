@@ -80,6 +80,7 @@ func (c *Client) Connect() error {
 	dlog.Printf("dialing master...")
 	_, err := c.dialMaster()
 	if err != nil {
+		dlog.Printf("master connection failed: %v", err)
 		return err
 	}
 
@@ -93,7 +94,7 @@ func (c *Client) Connect() error {
 	c.replicas = masterReply.ReplicaList
 
 	dlog.Printf("searching for the closest replica...")
-	err = c.findClosest(masterReply.AliveList)
+	!err = c.findClosest(masterReply.AliveList)
 	if err != nil {
 		dlog.Printf("Cannot find closest replica: %v", err)
 		return err
