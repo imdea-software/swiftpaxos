@@ -80,7 +80,6 @@ func (c *Client) Connect() error {
 	dlog.Printf("dialing master...")
 	_, err := c.dialMaster()
 	if err != nil {
-		dlog.Printf("master connection failed: %v", err)
 		return err
 	}
 
@@ -339,6 +338,7 @@ func (c *Client) dialMaster() (*rpc.Client, error) {
 	addr := fmt.Sprintf("%s:%d", c.masterAddr, c.masterPort)
 	conn, err := c.dial(addr, true)
 	if err != nil {
+		dlog.Printf("master (@%v) connection failed: %v", addr, err)
 		return nil, err
 	}
 	c.master = rpc.NewClient(conn)
