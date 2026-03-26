@@ -55,7 +55,8 @@ func Client_Connect(h C.longlong) {
 		log.Fatal("Client does not exist.")
 	}
 	if err := cl.Connect(); err != nil {
-		log.Fatal("Cannot connect; reason:", err)
+		log.Printf("Client cannot connect: %v", err)
+		log.Fatal("Stopping")
 	}
 	if cl.Leaderless {
 		cl.WaitReplies(cl.ClosestId)
