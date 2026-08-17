@@ -338,14 +338,14 @@ func (r *Replica) bcastCommit(instance int32, ballot int32, command []state.Comm
 	pcs.Instance = instance
 	pcs.Ballot = ballot
 	pcs.Count = int32(len(command))
-	argsShort := &pcs
+	args := &pc
 
 	sent := 0
 	for q := 0; q < r.N-1; q++ {
 		if !r.Alive[r.PreferredPeerOrder[q]] {
 			continue
 		}
-		r.SendMsg(r.PreferredPeerOrder[q], r.commitShortRPC, argsShort)
+		r.SendMsg(r.PreferredPeerOrder[q], r.commitShortRPC, args)
 		sent++
 	}
 
