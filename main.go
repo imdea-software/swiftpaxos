@@ -124,6 +124,9 @@ func runSingleClient(c *config.Config, i int, verbose bool) {
 	case "paxos":
 		c.WaitClosest = false
 		c.Fast = false
+	default:
+		fmt.Println("Unknown protocol")
+		os.Exit(1)
 	}
 
 	server := c.Proxy.ProxyOf(c.ClientAddrs[c.Alias])
