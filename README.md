@@ -1,6 +1,6 @@
 SwiftPaxos: Fast Geo-Replicated State Machines
 ==========
-[![Go Report Card](https://goreportcard.com/badge/github.com/imdea-software/swiftpaxos)](https://goreportcard.com/report/github.com/imdea-software/swiftpaxos)
+<!-- [![Go Report Card](https://goreportcard.com/badge/github.com/imdea-software/swiftpaxos)](https://goreportcard.com/report/github.com/imdea-software/swiftpaxos) -->
 
 This repository contains the prototype implementation of SwiftPaxos, a new state-machine replication protocol for geo-distributed systems.
 SwiftPaxos is a _faster Paxos without compromises_.
