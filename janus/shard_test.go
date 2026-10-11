@@ -11,6 +11,9 @@ func TestLayout(t *testing.T) {
 	if l.NumShards() != 2 || l.ShardOfReplica(4) != 1 || l.F() != 1 {
 		t.Fatal("bad layout")
 	}
+	if l.FastQuorum() != 3 || l.Majority() != 2 {
+		t.Fatal("the fast quorum of Janus is every replica of the shard")
+	}
 	if NewLayout(5, 0).NumShards() != 1 {
 		t.Fatal("0 must mean full replication")
 	}

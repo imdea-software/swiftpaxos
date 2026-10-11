@@ -2,21 +2,28 @@
 // one-shot transactions over a sharded, replicated store.
 //
 // Each shard is replicated by a group of replicas (see Layout). A client sends
-// a transaction (a list of single-key operations) to a replica, which acts as
-// the coordinator of the transaction. The coordinator runs, on every shard the
-// transaction touches, an EPaxos-like protocol:
+// a transaction (a list of single-key operations) to a replica, which hosts the
+// coordinator of the transaction (the paper's coordinator, co-located with the
+// closest server). The coordinator follows the failure-free path of the paper
+// (Algorithms 1-5):
 //
-//   - PreAccept: replicas of the shard record the transaction and answer with
-//     the conflicting transactions they have already seen (dependencies).
-//   - Fast path: if, at every shard, a fast quorum answers with identical
-//     dependencies, the coordinator commits with the union of the dependencies.
-//   - Slow path: otherwise the union is first fixed at every shard with a
-//     Paxos Accept phase (majority of each shard), then committed.
+//   - PreAccept: sent to every replica of every shard the transaction touches.
+//     Each replica records the transaction and answers with the conflicting
+//     transactions it has already seen (dependencies).
+//   - Fast path: if every replica of every shard (the fast quorum of Janus)
+//     answers with identical dependencies, the coordinator commits with the
+//     union of the dependencies.
+//   - Slow path: otherwise, once a majority of each shard answered, the union
+//     is sent with Accept (ballot 0) to every replica of every shard, and
+//     committed once a majority of each shard accepted.
 //   - Execution: a replica executes its part of a transaction once the
 //     transaction and all its ancestors are committed. Strongly connected
 //     components of the dependency graph are executed in a deterministic
-//     order (transaction id). Dependency information about transactions that
-//     do not touch the replica's shard is fetched with Inquire messages.
+//     order (transaction id). The dependencies of an ancestor that does not
+//     touch the replica's shard are obtained with an Inquire to the nearest
+//     replica that the ancestor involves, answered once it committed there.
+//     Every replica returns its results to the coordinator, which answers the
+//     client with the first results of each shard.
 //
 // Differences with the original EPaxos code base (epaxos/): dependencies are
 // explicit sets of transactions (a replica never sees all the instances of
@@ -48,9 +55,11 @@ const (
 )
 
 const (
-	tickPeriod   = 50 * time.Millisecond
-	widenAfter   = 2 * time.Second
-	inquireAfter = 200 * time.Millisecond
+	tickPeriod = 50 * time.Millisecond
+	// a coordinator that has not heard from every replica of the shards of a
+	// transaction after this delay gives up the fast path and settles for a
+	// majority of each shard (slow path)
+	fastTimeout = 2 * time.Second
 )
 
 // RPC codes of the client messages; the client registers them in the same order.
@@ -81,13 +90,11 @@ type Node struct {
 	local    bool // touches the shard of this replica
 	recorded bool // registered in the per-key conflict structures
 	done     bool // executed here (local) or ordered by an SCC computation (non-local)
-	scc      int  // id of the SCC in which the node was ordered
+	inquired bool // an Inquire was sent for this (non-local) transaction
 
 	// tarjan
 	gen, index, low int
 	onStack         bool
-
-	lastInquire time.Time
 }
 
 // fent is an access to a key that later conflicting transactions must depend on.
@@ -99,7 +106,8 @@ type fent struct {
 // keyDeps is the frontier of a key: accesses not yet covered by a committed
 // write. A write covers the accesses that appear in its final dependencies, so
 // a later transaction conflicting with a covered access reaches it through the
-// write.
+// write (this pruning is not part of the paper, which keeps every conflicting
+// transaction as a direct dependency).
 type keyDeps struct {
 	ents []fent
 }
@@ -110,21 +118,19 @@ type scanRec struct {
 }
 
 type shardState struct {
-	members []int32 // replicas asked
-	need    int
 	replies map[int32][]Dep
 	accepts map[int32]bool
-	widened bool
 }
 
 type coordState struct {
-	propose *TxnPropose
-	shards  []int
-	sh      map[int]*shardState
-	phase   int // 0: preaccept, 1: accept, 2: committed
-	start   time.Time
-	results map[int][][]byte
-	final   []Dep
+	propose  *TxnPropose
+	shards   []int
+	sh       map[int]*shardState
+	phase    int // 0: preaccept, 1: accept, 2: committed
+	start    time.Time
+	timedOut bool // the fast path was given up (see fastTimeout)
+	results  map[int][][]byte
+	final    []Dep
 }
 
 type Replica struct {
@@ -148,9 +154,10 @@ type Replica struct {
 	pending map[TxnId]*Node
 	coords  map[TxnId]*coordState
 	next    int32
+	// replicas waiting for the commit of a transaction (Inquire)
+	inquirers map[TxnId][]int32
 
 	gen, idx int
-	sccSeq   int
 	stack    []*Node
 	dirty    bool
 
@@ -186,6 +193,8 @@ func New(alias string, id int, peerAddrList []string, shardSize int, conf *confi
 		keys:    make(map[state.Key]*keyDeps),
 		pending: make(map[TxnId]*Node),
 		coords:  make(map[TxnId]*coordState),
+
+		inquirers: make(map[TxnId][]int32),
 	}
 	// the first two codes are shared with clients
 	if c := r.RPC.Register(new(TxnPropose), r.proposeChan); c != TxnProposeCode {
@@ -282,41 +291,28 @@ func (r *Replica) touches(shards uint64) bool {
 	return shards&(1<<uint(r.shard)) != 0
 }
 
-func (r *Replica) isMember(s int) bool { return s == r.shard }
-
-// quorum returns size replicas of shard s, preferring this replica (if it
-// belongs to s) and then the closest ones.
-func (r *Replica) quorum(s, size int) []int32 {
-	q := make([]int32, 0, size)
-	if r.isMember(s) {
-		q = append(q, r.Id)
-	}
+// nearest returns the closest other replica of one of the given shards, or -1.
+func (r *Replica) nearest(shards uint64) int32 {
 	for _, p := range r.PreferredPeerOrder {
-		if len(q) >= size {
-			break
-		}
-		if p != r.Id && r.lay.ShardOfReplica(p) == s {
-			q = append(q, p)
+		if p != r.Id && shards&(1<<uint(r.lay.ShardOfReplica(p))) != 0 {
+			return p
 		}
 	}
-	return q
+	return -1
 }
 
-// fastQuorumSize is the number of PreAccept replies required on a shard to
-// take the fast path (the coordinator, if it replicates the shard, counts).
-func (r *Replica) fastQuorumSize(s int) int {
-	q := r.lay.FastQuorum()
-	if !r.isMember(s) && q < r.lay.ShardSize {
-		q++
+// sameReplies tells whether all the replies of a shard carry identical dependencies.
+func sameReplies(replies map[int32][]Dep) bool {
+	var first []Dep
+	i := 0
+	for _, ds := range replies {
+		if i > 0 && !equalDeps(first, ds) {
+			return false
+		}
+		first = ds
+		i++
 	}
-	return q
-}
-
-func (r *Replica) responder(id TxnId, s int) int32 {
-	if r.lay.ShardOfReplica(id.R) == s {
-		return id.R
-	}
-	return int32(s*r.lay.ShardSize) + id.R%int32(r.lay.ShardSize)
+	return true
 }
 
 func sortDeps(ds []Dep) {
@@ -435,21 +431,31 @@ func (r *Replica) record(n *Node) {
 	}
 }
 
-// cover removes from the frontiers the accesses covered by the executed write
-// n: its dependencies that were ordered before it (i.e., not in its own SCC,
-// otherwise two writes of a cycle would cover each other).
+// cover removes from the frontiers of the keys written by the committed
+// transaction n the accesses that appear in its (final) dependencies. A later
+// transaction depending on n thus reaches them through n. To preserve this, n
+// covers a key only if it is still in its frontier: two transactions of a
+// cycle cannot cover each other.
 func (r *Replica) cover(n *Node) {
 	deps := make(map[TxnId]struct{}, len(n.Deps))
 	for _, d := range n.Deps {
-		if m := r.nodes[d.Id]; m != nil && m.done && m.scc != n.scc {
-			deps[d.Id] = struct{}{}
-		}
+		deps[d.Id] = struct{}{}
 	}
 	for _, c := range r.localCmds(n.Cmds) {
 		if c.Op != state.PUT {
 			continue
 		}
 		kd := r.keys[c.K]
+		present := false
+		for _, e := range kd.ents {
+			if e.dep.Id == n.Id {
+				present = true
+				break
+			}
+		}
+		if !present {
+			continue
+		}
 		keep := kd.ents[:0]
 		for _, e := range kd.ents {
 			if _, covered := deps[e.dep.Id]; !covered || e.dep.Id == n.Id {
@@ -480,16 +486,14 @@ func (r *Replica) handlePropose(m *TxnPropose) {
 	r.coords[id] = cs
 	mask := shardMask(ss)
 	for _, s := range ss {
-		q := r.fastQuorumSize(s)
 		cs.sh[s] = &shardState{
-			members: r.quorum(s, q),
-			need:    q,
 			replies: make(map[int32][]Dep),
 			accepts: make(map[int32]bool),
 		}
 	}
+	// Algorithm 1, line 3: PreAccept to all the participating servers
 	for _, s := range ss {
-		for _, p := range cs.sh[s].members {
+		for _, p := range r.lay.Replicas(s) {
 			r.sendPreAccept(id, cs, mask, p)
 		}
 	}
@@ -505,47 +509,51 @@ func (r *Replica) sendPreAccept(id TxnId, cs *coordState, mask uint64, p int32) 
 	r.SendMsg(p, r.preAcceptRPC, &PreAccept{Id: id, Shards: mask, Cmds: cs.propose.Cmds})
 }
 
+// checkPreAccepted implements Algorithm 1, lines 4-11. The fast quorum of a
+// shard is all its replicas: the fast path is taken when every replica of every
+// shard returned identical dependencies. Once this is excluded (some shard
+// returned different dependencies, or fastTimeout expired), the coordinator
+// goes to the Accept phase as soon as a majority of each shard answered.
 func (r *Replica) checkPreAccepted(id TxnId, cs *coordState) {
 	if cs.phase != 0 {
 		return
 	}
-	allFast := true
-	var sets [][]Dep
+	fast := !cs.timedOut
 	for _, s := range cs.shards {
 		sh := cs.sh[s]
-		if len(sh.replies) < sh.need {
+		if len(sh.replies) < r.maj {
 			return
 		}
-		var first []Dep
-		eq := !sh.widened
-		i := 0
-		for _, ds := range sh.replies {
-			if i == 0 {
-				first = ds
-			} else if !equalDeps(first, ds) {
-				eq = false
-			}
-			i++
-			sets = append(sets, ds)
+		if !sameReplies(sh.replies) {
+			fast = false
 		}
-		if !eq {
-			allFast = false
+	}
+	if fast {
+		for _, s := range cs.shards {
+			if len(cs.sh[s].replies) < r.lay.FastQuorum() {
+				return // the fast path is still possible
+			}
+		}
+	}
+	var sets [][]Dep
+	for _, s := range cs.shards {
+		for _, ds := range cs.sh[s].replies {
+			sets = append(sets, ds)
 		}
 	}
 	cs.final = unionDeps(sets...)
-	if allFast {
+	if fast {
 		r.fastPaths++
 		r.commit(id, cs)
 		return
 	}
+	// Algorithm 1, lines 14-16: Accept to all the participating servers
 	r.slowPaths++
 	cs.phase = 1
 	mask := shardMask(cs.shards)
 	for _, s := range cs.shards {
 		sh := cs.sh[s]
-		sh.members = r.quorum(s, r.maj)
-		sh.need = r.maj
-		for _, p := range sh.members {
+		for _, p := range r.lay.Replicas(s) {
 			if p == r.Id {
 				if r.acceptLocal(id, 0, mask, cs.propose.Cmds, cs.final) {
 					sh.accepts[p] = true
@@ -558,12 +566,13 @@ func (r *Replica) checkPreAccepted(id TxnId, cs *coordState) {
 	r.checkAccepted(id, cs)
 }
 
+// checkAccepted implements Algorithm 1, lines 17-18.
 func (r *Replica) checkAccepted(id TxnId, cs *coordState) {
 	if cs.phase != 1 {
 		return
 	}
 	for _, s := range cs.shards {
-		if len(cs.sh[s].accepts) < cs.sh[s].need {
+		if len(cs.sh[s].accepts) < r.maj {
 			return
 		}
 	}
@@ -617,6 +626,11 @@ func (r *Replica) handleAcceptReply(m *AcceptReply) {
 func (r *Replica) handleExecResult(m *ExecResult) {
 	cs := r.coords[m.Id]
 	if cs == nil {
+		return
+	}
+	// every replica returns its results (Algorithm 4, line 57): use the
+	// first ones received for each shard
+	if _, ok := cs.results[int(m.Shard)]; ok {
 		return
 	}
 	cs.results[int(m.Shard)] = m.Vals
@@ -708,16 +722,24 @@ func (r *Replica) handleCommit(m *Commit) {
 	r.registerDeps(m.Deps)
 	if n.local {
 		r.record(n)
+		r.cover(n)
 		if !n.done {
 			r.pending[n.Id] = n
 		}
 	}
+	for _, p := range r.inquirers[n.Id] {
+		r.SendMsg(p, r.commitRPC, m)
+	}
+	delete(r.inquirers, n.Id)
 	r.dirty = true
 }
 
+// handleInquire answers with the dependencies of a transaction once it is
+// committed here.
 func (r *Replica) handleInquire(m *Inquire) {
 	n := r.nodes[m.Id]
 	if n == nil || n.Status != COMMITTED {
+		r.inquirers[m.Id] = append(r.inquirers[m.Id], m.From)
 		return
 	}
 	r.SendMsg(m.From, r.commitRPC, &Commit{Id: n.Id, Shards: n.Shards, Cmds: n.Cmds, Deps: n.Deps})
@@ -745,7 +767,8 @@ func (r *Replica) executePending() {
 }
 
 // strongConnect is Tarjan's algorithm over the dependency graph. It returns
-// false if some ancestor is not committed yet (in which case it is inquired).
+// false if some ancestor is not committed yet (in which case it is inquired,
+// unless it involves this replica, which then waits for its Commit).
 func (r *Replica) strongConnect(v *Node) bool {
 	v.gen, v.index, v.low = r.gen, r.idx, r.idx
 	r.idx++
@@ -781,17 +804,14 @@ func (r *Replica) strongConnect(v *Node) bool {
 		scc := append([]*Node(nil), r.stack[i:]...)
 		r.stack = r.stack[:i]
 		sort.Slice(scc, func(a, b int) bool { return scc[a].Id.less(scc[b].Id) })
-		r.sccSeq++
 		for _, n := range scc {
 			n.onStack = false
 			n.done = true
-			n.scc = r.sccSeq
 			delete(r.pending, n.Id)
 		}
 		for _, n := range scc {
 			if n.local {
 				r.execute(n)
-				r.cover(n)
 			}
 		}
 	}
@@ -808,32 +828,24 @@ func (r *Replica) execute(n *Node) {
 	if execHook != nil {
 		execHook(r.Id, n.Id, n.Cmds, vals)
 	}
-	if r.responder(n.Id, r.shard) == r.Id {
-		res := &ExecResult{Id: n.Id, Shard: int32(r.shard), Vals: vals}
-		if n.Id.R == r.Id {
-			r.handleExecResult(res)
-		} else {
-			r.SendMsg(n.Id.R, r.execResultRPC, res)
-		}
+	res := &ExecResult{Id: n.Id, Shard: int32(r.shard), Vals: vals}
+	if n.Id.R == r.Id {
+		r.handleExecResult(res)
+	} else {
+		r.SendMsg(n.Id.R, r.execResultRPC, res)
 	}
 }
 
-// inquire asks the replicas of the shards of w for its Commit message.
+// inquire asks the nearest replica involved in w for its dependencies
+// (Algorithm 4, lines 44-45). If w involves this replica, its Commit will
+// arrive anyway.
 func (r *Replica) inquire(w *Node) {
-	now := time.Now()
-	if now.Sub(w.lastInquire) < inquireAfter {
+	if w.inquired || w.Shards == 0 || r.touches(w.Shards) {
 		return
 	}
-	w.lastInquire = now
-	for s := 0; s < r.lay.NumShards(); s++ {
-		if w.Shards&(1<<uint(s)) == 0 {
-			continue
-		}
-		for _, p := range r.lay.Replicas(s) {
-			if p != r.Id {
-				r.SendMsg(p, r.inquireRPC, &Inquire{Id: w.Id, From: r.Id})
-			}
-		}
+	if p := r.nearest(w.Shards); p >= 0 {
+		w.inquired = true
+		r.SendMsg(p, r.inquireRPC, &Inquire{Id: w.Id, From: r.Id})
 	}
 }
 
@@ -845,25 +857,11 @@ func (r *Replica) onTick() {
 	}
 	now := time.Now()
 	for id, cs := range r.coords {
-		if cs.phase != 0 || now.Sub(cs.start) < widenAfter {
+		if cs.phase != 0 || cs.timedOut || now.Sub(cs.start) < fastTimeout {
 			continue
 		}
-		// some replicas did not answer: ask the whole shard and settle for a
-		// majority (slow path).
-		mask := shardMask(cs.shards)
-		for _, s := range cs.shards {
-			sh := cs.sh[s]
-			if sh.widened || len(sh.replies) >= sh.need {
-				continue
-			}
-			sh.widened = true
-			sh.need = r.maj
-			for _, p := range r.lay.Replicas(s) {
-				if _, ok := sh.replies[p]; !ok && p != r.Id {
-					r.SendMsg(p, r.preAcceptRPC, &PreAccept{Id: id, Shards: mask, Cmds: cs.propose.Cmds})
-				}
-			}
-		}
+		// some replicas did not answer: settle for a majority (slow path)
+		cs.timedOut = true
 		r.checkPreAccepted(id, cs)
 	}
 }

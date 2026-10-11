@@ -41,17 +41,10 @@ func (l Layout) F() int { return (l.ShardSize - 1) / 2 }
 // Majority is the size of a slow (Accept) quorum within a shard.
 func (l Layout) Majority() int { return l.ShardSize/2 + 1 }
 
-// FastQuorum is the number of PreAccept replies, the coordinator's own
-// included if it replicates the shard, needed to take the fast path.
-// For an odd shard size 2F+1 it is EPaxos' F+(F+1)/2. For an even size,
-// where F+(F+1)/2 quorums would not intersect, every replica is required.
-func (l Layout) FastQuorum() int {
-	if l.ShardSize%2 == 0 {
-		return l.ShardSize
-	}
-	f := l.F()
-	return f + (f+1)/2
-}
+// FastQuorum is the number of identical PreAccept replies needed on a shard
+// to take the fast path. In Janus, it is every replica of the shard (Section
+// 3.1 of the paper), so that a majority always witnesses a fast-path decision.
+func (l Layout) FastQuorum() int { return l.ShardSize }
 
 // ShardsOf returns the (sorted, distinct) shards touched by a transaction.
 // A SCAN touches all shards.

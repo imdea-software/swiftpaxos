@@ -100,8 +100,13 @@ Janus
 
 `protocol: janus` runs [Janus](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/mu) (OSDI'16),
 a protocol for strictly serializable *one-shot* transactions over a sharded and replicated store.
-Its logic (PreAccept / Accept / Commit, dependency tracking, SCC-based execution) derives from EPaxos, run per shard,
-with the dependencies of a transaction merged across the shards it touches.
+It follows the failure-free path of the paper (Algorithms 1-5): PreAccept is sent to every replica of the shards
+a transaction touches, and the fast path is taken only when *every* replica of every shard returns identical dependencies
+(the fast quorum of Janus). Otherwise, once a majority of each shard answered, the union of the dependencies is fixed with
+an Accept phase (majority of each shard). Committed transactions are executed in the order of the dependency graph,
+strongly connected components in transaction id order; the dependencies of ancestors that do not touch a replica's shard
+are obtained with an Inquire to the nearest replica involved in them.
+The coordinator of a transaction runs on the replica the client contacts, rather than at the client as in the paper.
 See [janus.conf](janus.conf) for an example.
 
 **Sharding.** The parameter `replicasPerShard` (replicas section of the configuration) is the number of replicas of each shard.
@@ -125,8 +130,9 @@ Clients submit it to their closest replica, which coordinates it:
 When run with `-run client`, a Janus client executes `reqs` random transactions of `txnSize` operations
 (`writes` % of them are PUTs, `conflicts` % of them target the hot key `key`).
 
-**Limitations.** Recovery of a failed coordinator is not implemented: a transaction whose coordinator crashes before
-committing blocks the transactions that depend on it. Replicas keep the dependency graph of past transactions,
+**Limitations.** Recovery of a failed coordinator (Prepare phase, ballots, abandoned transactions) is not implemented:
+a transaction whose coordinator crashes before committing blocks the transactions that depend on it.
+A coordinator that does not hear from every replica gives up the fast path after a timeout and settles for a majority. Replicas keep the dependency graph of past transactions,
 and the dependencies on SCANs, in memory (no garbage collection).
 
 Flint
