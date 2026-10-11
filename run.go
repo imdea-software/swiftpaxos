@@ -14,6 +14,7 @@ import (
 	"github.com/imdea-software/swiftpaxos/dlog"
 	"github.com/imdea-software/swiftpaxos/epaxos"
 	"github.com/imdea-software/swiftpaxos/fastpaxos"
+	"github.com/imdea-software/swiftpaxos/janus"
 	"github.com/imdea-software/swiftpaxos/n2paxos"
 	"github.com/imdea-software/swiftpaxos/paxos"
 	"github.com/imdea-software/swiftpaxos/replica/defs"
@@ -53,6 +54,13 @@ func runReplica(c *config.Config, logger *dlog.Logger) {
 		rpc.Register(rep)
 	case "paxos":
 		rep := paxos.New(c.Alias, replicaId, nodeList, isLeader, f, c, logger)
+		rpc.Register(rep)
+	case "janus":
+		log.Println("Starting Janus replica...")
+		if _, err := c.NumShards(len(nodeList)); err != nil {
+			log.Fatal(err)
+		}
+		rep := janus.New(c.Alias, replicaId, nodeList, c.ShardSize(len(nodeList)), c, logger)
 		rpc.Register(rep)
 	case "epaxos":
 		rep := epaxos.New(c.Alias, replicaId, nodeList, !c.Noop, false, false, 0, false, f, c, logger)

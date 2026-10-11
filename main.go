@@ -12,6 +12,7 @@ import (
 	"github.com/imdea-software/swiftpaxos/client"
 	"github.com/imdea-software/swiftpaxos/config"
 	"github.com/imdea-software/swiftpaxos/dlog"
+	"github.com/imdea-software/swiftpaxos/janus"
 	"github.com/imdea-software/swiftpaxos/master"
 	"github.com/imdea-software/swiftpaxos/replica/defs"
 	"github.com/imdea-software/swiftpaxos/swift"
@@ -151,6 +152,9 @@ func runSingleClient(c *config.Config, i int, verbose bool) {
 	case "epaxos":
 		c.Leaderless = true
 		c.Fast = false
+	case "janus":
+		c.Leaderless = true
+		c.Fast = false
 	case "paxos":
 		c.WaitClosest = false
 		c.Fast = false
@@ -166,7 +170,10 @@ func runSingleClient(c *config.Config, i int, verbose bool) {
 	if err := b.Connect(); err != nil {
 		log.Fatal(err)
 	}
-	if p := strings.ToLower(c.Protocol); p == "swiftpaxos" {
+	if p := strings.ToLower(c.Protocol); p == "janus" {
+		jc := janus.NewClient(b.Client)
+		jc.Loop(c.Reqs, c.TxnSize, c.CommandSize, c.Writes, c.Conflicts, int64(c.Key))
+	} else if p == "swiftpaxos" {
 		cl := swift.NewClient(b, len(c.ReplicaAddrs))
 		if cl == nil {
 			return

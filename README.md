@@ -25,6 +25,7 @@ Implemented protocols
 | CURP                    | CURP implemented over N<sup>2</sup>Paxos.         |
 | Fast Paxos              | Fast Paxos with uncoordinated collision recovery. |
 | EPaxos                  | A [corrected][epaxos_correct] version of EPaxos.  |
+| Janus                   | One-shot transactions over a sharded store, see [below](#janus). |
 
 This software is based on the [Egalitarian Paxos](https://github.com/otrack/epaxos) code base, as well as the corrections made [here](https://github.com/otrack/epaxos).
 
@@ -93,6 +94,40 @@ Usage is as follows:
 	docker run --rm -e NSERVERS=3 -e TYPE=server -e MADDR=172.17.0.2 $(whoami)/swiftpaxos	
 	docker run --rm -e NSERVERS=3 -e TYPE=server -e MADDR=172.17.0.2 $(whoami)/swiftpaxos
 	
+
+Janus
+-----
+
+`protocol: janus` runs [Janus](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/mu) (OSDI'16),
+a protocol for strictly serializable *one-shot* transactions over a sharded and replicated store.
+Its logic (PreAccept / Accept / Commit, dependency tracking, SCC-based execution) derives from EPaxos, run per shard,
+with the dependencies of a transaction merged across the shards it touches.
+See [janus.conf](janus.conf) for an example.
+
+**Sharding.** The parameter `replicasPerShard` (replicas section of the configuration) is the number of replicas of each shard.
+It defaults to 0, which means that every replica replicates everything (a single shard).
+The number of replicas must be a multiple of it.
+Replica ids are given by the master in registration order, and replicas `[s*k, (s+1)*k)` form shard `s`.
+A key lives in shard `key mod numberOfShards`; a SCAN is sent to all the shards, each one scanning its own keys
+(results are concatenated in shard order).
+
+**Transactions.** A transaction is a list of operations, each on a single key, among `PUT`, `GET` and `SCAN`
+(the operations of `state/state.go`; the state machine is unchanged).
+Clients submit it to their closest replica, which coordinates it:
+
+    jc := janus.NewClient(c)           // c is a connected *client.Client (leaderless)
+    vals, err := jc.Execute(janus.Txn{
+        janus.Put(1, []byte("a")),
+        janus.Get(2),
+        janus.Scan(10, 5),
+    })                                // vals[i] is the result of the i-th operation
+
+When run with `-run client`, a Janus client executes `reqs` random transactions of `txnSize` operations
+(`writes` % of them are PUTs, `conflicts` % of them target the hot key `key`).
+
+**Limitations.** Recovery of a failed coordinator is not implemented: a transaction whose coordinator crashes before
+committing blocks the transactions that depend on it. Replicas keep the dependency graph of past transactions,
+and the dependencies on SCANs, in memory (no garbage collection).
 
 Flint
 -----

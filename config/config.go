@@ -78,6 +78,10 @@ type Config struct {
 	// optimized reads (when available)
 	Optread    bool
 	Leaderless bool
+	// number of replicas per shard (0: every replica replicates everything)
+	ReplicasPerShard int
+	// number of operations per transaction (janus clients)
+	TxnSize int
 	// replicas send replies directly to clients
 	Fast bool
 	// address of the leader or nil
@@ -217,6 +221,12 @@ func Read(filename, alias string) (*Config, error) {
 			case "thrifty":
 				c.Thrifty, err = expectBool(words)
 				ok = true
+			case "txnsize":
+				c.TxnSize, err = expectInt(words)
+				ok = true
+			case "replicaspershard":
+				c.ReplicasPerShard, err = expectInt(words)
+				ok = true
 			case "optread":
 				c.Optread, err = expectBool(words)
 				ok = true
@@ -328,4 +338,22 @@ func expect[R expectRet](ws []string, f func(string) (R, error), none R) (R, err
 		return i, Err(ws[0], "Invalid argument", err)
 	}
 	return i, nil
+}
+
+// ShardSize returns the number of replicas per shard for n replicas in total.
+func (c *Config) ShardSize(n int) int {
+	if c.ReplicasPerShard <= 0 || c.ReplicasPerShard > n {
+		return n
+	}
+	return c.ReplicasPerShard
+}
+
+// NumShards returns the number of shards for n replicas in total, or an error
+// if n is not a multiple of the shard size.
+func (c *Config) NumShards(n int) (int, error) {
+	k := c.ShardSize(n)
+	if k == 0 || n%k != 0 {
+		return 0, fmt.Errorf("%d replicas cannot be split in shards of %d", n, k)
+	}
+	return n / k, nil
 }

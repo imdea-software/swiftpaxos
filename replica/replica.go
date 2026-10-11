@@ -553,6 +553,12 @@ func (r *Replica) clientListener(conn net.Conn) {
 				if err = obj.Unmarshal(reader); err != nil {
 					break
 				}
+				// custom client messages may ask to be answered on this connection
+				if cm, ok := obj.(interface{ GetClientId() int32 }); ok {
+					r.M.Lock()
+					r.ClientWriters[cm.GetClientId()] = writer
+					r.M.Unlock()
+				}
 				go func(obj fastrpc.Serializable) {
 					time.Sleep(r.Dt.WaitDuration(addr))
 					p.Chan <- obj
