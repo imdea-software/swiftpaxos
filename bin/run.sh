@@ -21,6 +21,7 @@ if [ "${TYPE}" == "" ]; then
     NSERVERS
     PROTOCOL
     THRIFTY
+    REPLICASPERSHARD (optional, sharded protocols such as Janus)
     "
     exit 0
 fi
@@ -31,12 +32,18 @@ ADDR=$(ip -4 addr show dev "$IFACE" | awk '/inet /{print $2}' | cut -d/ -f1)
 if [ "${TYPE}" == "master" ]; then
     echo "master mode: ${args}"
     args="-run master -config ${CONFIG} -nservers ${NSERVERS}"
+    if [ -n "${PROTOCOL}" ]; then
+        args="${args} -protocol ${PROTOCOL}"
+    fi
     ${DIR}/swiftpaxos ${args} &
 fi
 
 if [ "${TYPE}" == "server" ]; then
     echo "server mode: ${args}"
     args="-run server -config ${CONFIG} -protocol ${PROTOCOL} -thrifty ${THRIFTY} -nservers ${NSERVERS} -maddr ${MADDR} -addr ${ADDR} -alias ${ADDR}"
+    if [ -n "${REPLICASPERSHARD}" ]; then
+        args="${args} -replicasPerShard ${REPLICASPERSHARD}"
+    fi
     ${DIR}/swiftpaxos ${args} &
 fi
 

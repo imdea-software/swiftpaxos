@@ -57,10 +57,13 @@ func runReplica(c *config.Config, logger *dlog.Logger) {
 		rpc.Register(rep)
 	case "janus":
 		log.Println("Starting Janus replica...")
-		if _, err := c.NumShards(len(nodeList)); err != nil {
+		shards, err := c.NumShards(len(nodeList))
+		if err != nil {
 			log.Fatal(err)
 		}
-		rep := janus.New(c.Alias, replicaId, nodeList, c.ShardSize(len(nodeList)), c, logger)
+		size := c.ShardSize(len(nodeList))
+		log.Printf("Janus replica %d: shard %d of %d (%d replicas per shard)", replicaId, replicaId/size, shards, size)
+		rep := janus.New(c.Alias, replicaId, nodeList, size, c, logger)
 		rpc.Register(rep)
 	case "epaxos":
 		rep := epaxos.New(c.Alias, replicaId, nodeList, !c.Noop, false, false, 0, false, f, c, logger)

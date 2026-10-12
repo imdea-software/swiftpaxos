@@ -1,5 +1,10 @@
 export GO111MODULE := on
 
+# tag of the Docker image (make image TAG=...)
+TAG ?= latest
+
+.PHONY: all compile clean image
+
 all: compile
 
 compile:
@@ -8,3 +13,6 @@ compile:
 clean:
 	go clean
 
+# Docker image <docker user>/swiftpaxos:$(TAG), see bin/image.sh
+image:
+	bin/image.sh $(TAG)

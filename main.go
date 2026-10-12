@@ -31,6 +31,7 @@ var (
 	port         = flag.String("port", "", "`Port` to listen clients (for a replica)")
 	leaderAddr   = flag.String("leader", "", "`Address` of the leader")
 	addr         = flag.String("addr", "", "IP addr to use for a replica (override the configuration file)") // FIXME
+	shardSize    = flag.Int("replicasPerShard", 0, "Number of replicas per shard, for sharded protocols such as Janus (override the configuration file)")
 )
 
 func main() {
@@ -49,6 +50,9 @@ func main() {
 
 	if *protocol != "" {
 		c.Protocol = *protocol
+	}
+	if *shardSize != 0 {
+		c.ReplicasPerShard = *shardSize
 	}
 	defs.LatencyConf = *latency
 
