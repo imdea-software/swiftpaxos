@@ -116,24 +116,40 @@ Replica ids are given by the master in registration order, and replicas `[s*k, (
 A key lives in shard `key mod numberOfShards`; a SCAN is sent to all the shards, each one scanning its own keys
 (results are concatenated in shard order).
 
-**Transactions.** A transaction is a list of operations, each on a single key, among `PUT`, `GET` and `SCAN`
-(the operations of `state/state.go`; the state machine is unchanged).
-Clients submit it to their closest replica, which coordinates it:
-
-    jc := janus.NewClient(c)           // c is a connected *client.Client (leaderless)
-    vals, err := jc.Execute(janus.Txn{
-        janus.Put(1, []byte("a")),
-        janus.Get(2),
-        janus.Scan(10, 5),
-    })                                // vals[i] is the result of the i-th operation
-
+**Transactions.** A transaction is a list of commands, each on a single key (see below).
+Clients use the standard client protocol: a transaction is a single `TXN` command, sent to the closest replica, which
+coordinates it; any other command is executed as a transaction of one command.
 When run with `-run client`, a Janus client executes `reqs` random transactions of `txnSize` operations
 (`writes` % of them are PUTs, `conflicts` % of them target the hot key `key`).
 
 **Limitations.** Recovery of a failed coordinator (Prepare phase, ballots, abandoned transactions) is not implemented:
 a transaction whose coordinator crashes before committing blocks the transactions that depend on it.
-A coordinator that does not hear from every replica gives up the fast path after a timeout and settles for a majority. Replicas keep the dependency graph of past transactions,
+A coordinator that does not hear from every replica gives up the fast path after a timeout and settles for a majority.
+Replicas keep the dependency graph of past transactions,
 and the dependencies on SCANs, in memory (no garbage collection).
+
+Data model and transactions
+---------------------------
+
+The state machine (`state/`) maps integer keys to values. Its commands are
+`PUT`, `GET` and `SCAN` (the values of the keys in `[key, key+count]`, concatenated) on opaque values, and the column model:
+a value can be a row of named columns, which `UPDATE` merges columns into and `INCR` increments a counter column
+(a decimal number) of, returning its new value; `DELETE` removes a key.
+Rows are self-delimiting, so a `SCAN` over rows is decoded with `state.DecodeRows`.
+
+The Go client executes one-shot transactions (lists of commands, each on a single key):
+
+    b.WaitReplies(b.ClosestId)
+    vals, err := b.Execute([]state.Command{
+        client.Update(1, state.Row{"name": []byte("a")}),
+        client.Incr(2, "counter", 1),
+        client.Get(3),
+    })                                 // vals[i] is the result of the i-th command
+
+With Janus, a transaction is executed atomically (the client learns the protocol from the master when it connects).
+The other protocols are not transactional: the commands of a
+transaction are then executed one after the other, each one atomically, as the YCSB driver does by default.
+The Java bindings (`bindings/java`) expose the same interface (`SwiftPaxos.execute`).
 
 Flint
 -----

@@ -52,7 +52,7 @@ func (ki *fullKeyInfo) add(cmd state.Command, cmdId CommandId) {
 		ki.clientLastCmd = append(ki.clientLastCmd, cmdId)
 	}
 
-	if cmd.Op == state.PUT {
+	if state.IsWrite(cmd.Op) {
 		writeIndex, exists := ki.lastWriteIndex[cmdId.ClientId]
 
 		if exists {
@@ -76,7 +76,7 @@ func (ki *fullKeyInfo) remove(cmd state.Command, cmdId CommandId) {
 		delete(ki.lastCmdIndex, cmdId.ClientId)
 	}
 
-	if cmd.Op == state.PUT {
+	if state.IsWrite(cmd.Op) {
 		writeIndex, exists := ki.lastWriteIndex[cmdId.ClientId]
 
 		if exists {
@@ -113,7 +113,7 @@ func newLightKeyInfo() *lightKeyInfo {
 func (ki *lightKeyInfo) add(cmd state.Command, cmdId CommandId) {
 	ki.lastCmd = []CommandId{cmdId}
 
-	if cmd.Op == state.PUT {
+	if state.IsWrite(cmd.Op) {
 		ki.lastWrite = []CommandId{cmdId}
 	}
 }

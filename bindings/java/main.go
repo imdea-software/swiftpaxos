@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/imdea-software/swiftpaxos/client"
+	"github.com/imdea-software/swiftpaxos/state"
 )
 
 var (
@@ -131,6 +132,37 @@ func Client_SendScan(h C.longlong, key C.longlong, count C.longlong, outBuf unsa
 	}
 	dst := unsafe.Slice((*byte)(outBuf), int(maxLen))
 	copy(dst, b)
+	return C.int(len(b))
+}
+
+// Client_Execute runs a one-shot transaction, atomically if the protocol is
+// transactional (see client.BufferClient.Execute). The input is a transaction encoded
+// as the argument of a TXN command (state.EncodeTxn), and the results are
+// written to outBuf, encoded with state.EncodeValues. It returns the length of
+// the results, -1 if the transaction is malformed, and -2 if outBuf is too small.
+//
+//export Client_Execute
+func Client_Execute(h C.longlong, txn *C.char, length C.int, outBuf unsafe.Pointer, maxLen C.int) C.int {
+	mu.Lock()
+	cl := clients[int64(h)]
+	mu.Unlock()
+	if cl == nil {
+		log.Fatal("Client does not exist.")
+	}
+	cmds, err := state.DecodeTxn(C.GoBytes(unsafe.Pointer(txn), length))
+	if err != nil {
+		return -1
+	}
+	vals, err := cl.Execute(cmds)
+	if err != nil {
+		log.Printf("Client_Execute: %v", err)
+		return -1
+	}
+	b := state.EncodeValues(vals)
+	if len(b) > int(maxLen) {
+		return -2
+	}
+	copy(unsafe.Slice((*byte)(outBuf), int(maxLen)), b)
 	return C.int(len(b))
 }
 

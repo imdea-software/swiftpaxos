@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imdea-software/swiftpaxos/client"
 	"github.com/imdea-software/swiftpaxos/config"
 	"github.com/imdea-software/swiftpaxos/dlog"
+	"github.com/imdea-software/swiftpaxos/replica/defs"
 	"github.com/imdea-software/swiftpaxos/state"
 )
 
@@ -115,23 +117,38 @@ type rawClient struct {
 	r  *bufio.Reader
 }
 
+// do runs a transaction (a TXN command) and returns the result of each command.
 func (c *rawClient) do(cmds []state.Command, seq int32) ([][]byte, error) {
-	c.w.WriteByte(TxnProposeCode)
-	(&TxnPropose{CommandId: seq, ClientId: c.id, Cmds: cmds}).Marshal(c.w)
+	v, err := c.send(state.Command{Op: state.TXN, V: state.EncodeTxn(cmds)}, seq)
+	if err != nil {
+		return nil, err
+	}
+	vals, err := state.DecodeValues(v)
+	if err != nil {
+		return nil, err
+	}
+	res := make([][]byte, len(vals))
+	for i := range vals {
+		res[i] = vals[i]
+	}
+	return res, nil
+}
+
+// send sends a command with the standard client protocol and returns its result.
+func (c *rawClient) send(cmd state.Command, seq int32) (state.Value, error) {
+	c.w.WriteByte(defs.PROPOSE)
+	(&defs.Propose{CommandId: seq, ClientId: c.id, Command: cmd}).Marshal(c.w)
 	if err := c.w.Flush(); err != nil {
 		return nil, err
 	}
-	if _, err := c.r.ReadByte(); err != nil {
-		return nil, err
-	}
-	rep := &TxnReply{}
+	rep := &defs.ProposeReplyTS{}
 	if err := rep.Unmarshal(c.r); err != nil {
 		return nil, err
 	}
 	if rep.CommandId != seq {
 		return nil, fmt.Errorf("unexpected reply %d != %d", rep.CommandId, seq)
 	}
-	return rep.Vals, nil
+	return rep.Value, nil
 }
 
 func put(k int64, v string) state.Command {
@@ -168,6 +185,45 @@ func TestTxnsBasic(t *testing.T) {
 	}
 	if len(vals[0]) != 3 {
 		t.Fatalf("scan returned %q", vals[0])
+	}
+
+	// single commands (not wrapped in a TXN) are one-command transactions
+	if _, err := c.send(put(7, "x"), 3); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := c.send(get(7), 4); err != nil || string(v) != "x" {
+		t.Fatalf("single GET returned %q, %v", v, err)
+	}
+
+	// column model, in a transaction spanning both shards (keys 4 and 5)
+	if _, err := c.do([]state.Command{client.Update(4, state.Row{"a": []byte("1"), "b": []byte("x")})}, 5); err != nil {
+		t.Fatal(err)
+	}
+	vals, err = c.do([]state.Command{client.Incr(4, "a", 1), client.Incr(5, "c", 3), client.Incr(5, "c", -1)}, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(vals[0]) != "2" || string(vals[1]) != "3" || string(vals[2]) != "2" {
+		t.Fatalf("INCR returned %q", vals)
+	}
+	vals, err = c.do([]state.Command{get(4), client.Delete(5), get(5)}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, err := state.DecodeRow(vals[0]); err != nil || string(row["a"]) != "2" || string(row["b"]) != "x" || len(row) != 2 {
+		t.Fatalf("row %v, %v", row, err)
+	}
+	if len(vals[2]) != 0 {
+		t.Fatalf("deleted key returned %q", vals[2])
+	}
+
+	// a malformed transaction has no result
+	v, err := c.send(state.Command{Op: state.TXN, V: state.Value("junk")}, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals, err := state.DecodeValues(v); err != nil || len(vals) != 0 {
+		t.Fatalf("malformed transaction returned %q, %v", vals, err)
 	}
 }
 

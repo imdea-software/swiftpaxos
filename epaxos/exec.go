@@ -136,7 +136,7 @@ func (e *Exec) strongconnect(v *Instance, index *int) bool {
 							w.lb.clientProposals[idx].Timestamp},
 						w.lb.clientProposals[idx].Reply,
 						w.lb.clientProposals[idx].Mutex)
-				} else if w.Cmds[idx].Op == state.PUT {
+				} else if state.IsWrite(w.Cmds[idx].Op) {
 					w.Cmds[idx].Execute(e.r.State)
 				}
 			}

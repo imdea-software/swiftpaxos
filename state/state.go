@@ -18,7 +18,16 @@ const (
 	PUT
 	GET
 	SCAN
+	UPDATE // merge the columns of V (a row) into the row stored at K
+	INCR   // add to a counter column of the row stored at K (see IncrArg)
+	DELETE // remove K
+	TXN    // one-shot transaction: V encodes its commands (see EncodeTxn)
 )
+
+// IsWrite tells whether an operation modifies the state.
+func IsWrite(op Operation) bool {
+	return op == PUT || op == UPDATE || op == INCR || op == DELETE
+}
 
 type Value []byte
 
@@ -90,7 +99,7 @@ func Conflict(gamma *Command, delta *Command) bool {
 	}
 
 	if key >= lb && key <= ub {
-		if gamma.Op == PUT || delta.Op == PUT {
+		if IsWrite(gamma.Op) || IsWrite(delta.Op) {
 			return true
 		}
 	}
@@ -126,6 +135,34 @@ func (c *Command) Execute(st *State) Value {
 			valAsserted := value.(Value)
 			return valAsserted
 		}
+
+	case UPDATE:
+		row := Row{}
+		if value, present := st.Store.Get(c.K); present {
+			row = rowOf(value.(Value))
+		}
+		if cols, err := DecodeRow(c.V); err == nil {
+			for n, v := range cols {
+				row[n] = v
+			}
+		}
+		st.Store.Put(c.K, row.Encode())
+
+	case INCR:
+		column, delta, err := decodeIncr(c.V)
+		if err != nil {
+			break
+		}
+		row := Row{}
+		if value, present := st.Store.Get(c.K); present {
+			row = rowOf(value.(Value))
+		}
+		v := increment(row, column, delta)
+		st.Store.Put(c.K, row.Encode())
+		return v
+
+	case DELETE:
+		st.Store.Remove(c.K)
 
 	case SCAN:
 		found := make([]Value, 0)
@@ -165,6 +202,20 @@ func (t *Command) String() string {
 	} else if t.Op == SCAN {
 		count := binary.LittleEndian.Uint64(t.V)
 		ret = "SCAN( " + t.K.String() + " , " + fmt.Sprint(count) + " )"
+	} else if t.Op == UPDATE {
+		ret = "UPDATE( " + t.K.String() + " , " + t.V.String() + " )"
+	} else if t.Op == INCR {
+		col, delta, _ := decodeIncr(t.V)
+		ret = "INCR( " + t.K.String() + " , " + col + " , " + fmt.Sprint(delta) + " )"
+	} else if t.Op == DELETE {
+		ret = "DELETE( " + t.K.String() + " )"
+	} else if t.Op == TXN {
+		cmds, _ := DecodeTxn(t.V)
+		ret = "TXN("
+		for i := range cmds {
+			ret += " " + cmds[i].String()
+		}
+		ret += " )"
 	} else {
 		ret = "UNKNOWN( " + t.V.String() + " , " + t.K.String() + " )"
 	}
@@ -230,10 +281,10 @@ func (t *Key) Unmarshal(r io.Reader) error {
 func (t *Value) Marshal(w io.Writer) {
 	bs := make([]byte, 4)
 	if t == nil {
-		binary.LittleEndian.PutUint16(bs, 0)
+		binary.LittleEndian.PutUint32(bs, 0)
 		w.Write(bs)
 	} else {
-		binary.LittleEndian.PutUint16(bs, uint16(len(*t)))
+		binary.LittleEndian.PutUint32(bs, uint32(len(*t)))
 		w.Write(bs)
 		w.Write(*t)
 	}
@@ -244,7 +295,7 @@ func (t *Value) Unmarshal(r io.Reader) error {
 	if _, err := io.ReadFull(r, bs); err != nil {
 		return err
 	}
-	len := binary.LittleEndian.Uint16(bs)
+	len := binary.LittleEndian.Uint32(bs)
 	bs = make([]byte, len)
 	if _, err := io.ReadFull(r, bs); err != nil {
 		return err

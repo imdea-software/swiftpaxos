@@ -389,7 +389,7 @@ func (r *Replica) handlePropose(msg *defs.GPropose, desc *commandDesc, cmdId Com
 		r.seqnum++
 	}
 
-	isRead := r.fastRead && msg.Command.Op != state.PUT
+	isRead := r.fastRead && !state.IsWrite(msg.Command.Op)
 
 	fastAckSend := copyFastAck(fastAck)
 	if !r.optExec {

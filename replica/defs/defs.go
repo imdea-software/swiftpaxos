@@ -3,6 +3,7 @@ package defs
 import (
 	"bufio"
 	"io"
+	"strings"
 	"sync"
 
 	fastrpc "github.com/imdea-software/swiftpaxos/rpc"
@@ -35,6 +36,13 @@ type GetReplicaListReply struct {
 	ReplicaList []string
 	AliveList   []bool
 	Ready       bool
+	Protocol    string // the protocol run by the replicas
+}
+
+// IsTransactional tells whether a protocol executes one-shot transactions
+// (TXN commands) atomically.
+func IsTransactional(protocol string) bool {
+	return strings.ToLower(protocol) == "janus"
 }
 
 // replica and client definitions

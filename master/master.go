@@ -34,9 +34,10 @@ type Master struct {
 	initCond   *sync.Cond
 	nextLeader int
 	leaderAddr *string
+	protocol   string
 }
 
-func New(N, port int, leaderAddr *string, logger *dlog.Logger) *Master {
+func New(N, port int, leaderAddr *string, protocol string, logger *dlog.Logger) *Master {
 	master := &Master{
 		Logger: logger,
 
@@ -53,6 +54,7 @@ func New(N, port int, leaderAddr *string, logger *dlog.Logger) *Master {
 		finishInit: false,
 		nextLeader: -1,
 		leaderAddr: leaderAddr,
+		protocol:   protocol,
 	}
 	master.initCond = sync.NewCond(master.lock)
 	return master
@@ -287,6 +289,7 @@ func (master *Master) GetReplicaList(args *defs.GetReplicaListArgs, reply *defs.
 		reply.Ready = false
 	}
 
+	reply.Protocol = master.protocol
 	reply.ReplicaList = make([]string, 0)
 	reply.AliveList = make([]bool, 0)
 	for i, node := range master.nodeList {

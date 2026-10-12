@@ -2,7 +2,6 @@ package client
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +33,10 @@ type Client struct {
 	Fast       bool
 	Verbose    bool
 	Leaderless bool
+	// the protocol executes one-shot transactions atomically (Janus), see
+	// BufferClient.Execute; set by Connect from the protocol reported by the
+	// master
+	Transactional bool
 
 	master  *rpc.Client
 	servers []net.Conn
@@ -91,6 +94,8 @@ func (c *Client) Connect() error {
 	}
 	masterReply := rl.(*defs.GetReplicaListReply)
 	c.replicas = masterReply.ReplicaList
+	c.Transactional = defs.IsTransactional(masterReply.Protocol)
+	c.Printf("protocol: %s (transactional: %v)", masterReply.Protocol, c.Transactional)
 
 	dlog.Printf("searching for the closest replica...")
 	err = c.findClosest(masterReply.AliveList)
@@ -99,7 +104,7 @@ func (c *Client) Connect() error {
 		return err
 	}
 	c.Printf("replicas: %s", c.replicas)
-	c.Printf("closest alive: %s", c.ClosestId)
+	c.Printf("closest alive: %d", c.ClosestId)
 
 	c.dt = defs.NewLatencyTable(defs.LatencyConf, defs.IP(), c.replicas)
 
@@ -198,57 +203,28 @@ func (c *Client) SendProposal(cmd defs.Propose) {
 	}
 }
 
-func (c *Client) SendWrite(key int64, value []byte) int32 {
+// SendCommand sends a command and returns its sequence number.
+func (c *Client) SendCommand(cmd state.Command) int32 {
 	c.seqnum++
-	p := defs.Propose{
+	c.SendProposal(defs.Propose{
 		CommandId: c.seqnum,
 		ClientId:  c.ClientId,
-		Command: state.Command{
-			Op: state.PUT,
-			K:  state.Key(key),
-			V:  value,
-		},
+		Command:   cmd,
 		Timestamp: 0,
-	}
-
-	c.SendProposal(p)
+	})
 	return c.seqnum
+}
+
+func (c *Client) SendWrite(key int64, value []byte) int32 {
+	return c.SendCommand(Put(key, value))
 }
 
 func (c *Client) SendRead(key int64) int32 {
-	c.seqnum++
-	p := defs.Propose{
-		CommandId: c.seqnum,
-		ClientId:  c.ClientId,
-		Command: state.Command{
-			Op: state.GET,
-			K:  state.Key(key),
-			V:  state.NIL(),
-		},
-		Timestamp: 0,
-	}
-
-	c.SendProposal(p)
-	return c.seqnum
+	return c.SendCommand(Get(key))
 }
 
 func (c *Client) SendScan(key, count int64) int32 {
-	c.seqnum++
-	p := defs.Propose{
-		CommandId: c.seqnum,
-		ClientId:  c.ClientId,
-		Command: state.Command{
-			Op: state.SCAN,
-			K:  state.Key(key),
-			V:  make([]byte, 8),
-		},
-		Timestamp: 0,
-	}
-
-	binary.LittleEndian.PutUint64(p.Command.V, uint64(count))
-
-	c.SendProposal(p)
-	return c.seqnum
+	return c.SendCommand(Scan(key, count))
 }
 
 func (c *Client) GetReplyFrom(rid int) (*defs.ProposeReplyTS, error) {

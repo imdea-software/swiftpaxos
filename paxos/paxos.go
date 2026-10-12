@@ -716,7 +716,7 @@ func (r *Replica) executeCommands() {
 							val,
 							inst.lb.clientProposals[j].Timestamp}
 						r.ReplyProposeTS(propreply, inst.lb.clientProposals[j].Reply, inst.lb.clientProposals[j].Mutex)
-					} else if inst.cmds[j].Op == state.PUT {
+					} else if state.IsWrite(inst.cmds[j].Op) {
 						inst.cmds[j].Execute(r.State)
 					}
 				}

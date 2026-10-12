@@ -175,50 +175,6 @@ type Dep struct {
 	Shards uint64
 }
 
-// ---- client <-> coordinator ----
-
-// TxnPropose is a one-shot transaction: a list of single-key operations.
-type TxnPropose struct {
-	CommandId int32
-	ClientId  int32
-	Cmds      []state.Command
-}
-
-func (m *TxnPropose) GetClientId() int32        { return m.ClientId }
-func (m *TxnPropose) New() fastrpc.Serializable { return new(TxnPropose) }
-func (m *TxnPropose) Marshal(w io.Writer) {
-	e := &enc{w: w}
-	e.i32(m.CommandId)
-	e.i32(m.ClientId)
-	e.cmds(m.Cmds)
-}
-func (m *TxnPropose) Unmarshal(r io.Reader) error {
-	d := &dec{r: r}
-	m.CommandId = d.i32()
-	m.ClientId = d.i32()
-	m.Cmds = d.cmds()
-	return d.err
-}
-
-// TxnReply carries one result per operation, in the order of the transaction.
-type TxnReply struct {
-	CommandId int32
-	Vals      [][]byte
-}
-
-func (m *TxnReply) New() fastrpc.Serializable { return new(TxnReply) }
-func (m *TxnReply) Marshal(w io.Writer) {
-	e := &enc{w: w}
-	e.i32(m.CommandId)
-	e.vals(m.Vals)
-}
-func (m *TxnReply) Unmarshal(r io.Reader) error {
-	d := &dec{r: r}
-	m.CommandId = d.i32()
-	m.Vals = d.vals()
-	return d.err
-}
-
 // ---- replica <-> replica ----
 
 // PreAccept: the coordinator submits a transaction to the replicas of a shard.

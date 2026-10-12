@@ -2,8 +2,7 @@
 // one-shot transactions over a sharded, replicated store.
 //
 // Each shard is replicated by a group of replicas (see Layout). A client sends
-// a transaction (a list of single-key operations) to a replica, which hosts the
-// coordinator of the transaction (the paper's coordinator, co-located with the
+// a transaction to a replica, which hosts the coordinator of the transaction (the paper's coordinator, co-located with the
 // closest server). The coordinator follows the failure-free path of the paper
 // (Algorithms 1-5):
 //
@@ -24,6 +23,11 @@
 //     replica that the ancestor involves, answered once it committed there.
 //     Every replica returns its results to the coordinator, which answers the
 //     client with the first results of each shard.
+//
+// Clients use the standard client protocol (defs.Propose). A transaction is a
+// TXN command, which encodes a list of single-key commands (state.EncodeTxn),
+// and its reply carries their results (state.EncodeValues). Any other command
+// is executed as a transaction of a single command.
 //
 // Differences with the original EPaxos code base (epaxos/): dependencies are
 // explicit sets of transactions (a replica never sees all the instances of
@@ -60,12 +64,6 @@ const (
 	// transaction after this delay gives up the fast path and settles for a
 	// majority of each shard (slow path)
 	fastTimeout = 2 * time.Second
-)
-
-// RPC codes of the client messages; the client registers them in the same order.
-const (
-	TxnProposeCode = defs.RPC_TABLE
-	TxnReplyCode   = defs.RPC_TABLE + 1
 )
 
 // Test hooks.
@@ -123,7 +121,9 @@ type shardState struct {
 }
 
 type coordState struct {
-	propose  *TxnPropose
+	client   *defs.GPropose
+	txn      bool // the client sent a TXN command (otherwise, a single command)
+	cmds     []state.Command
 	shards   []int
 	sh       map[int]*shardState
 	phase    int // 0: preaccept, 1: accept, 2: committed
@@ -141,12 +141,12 @@ type Replica struct {
 	members []int32
 	maj     int // majority of a shard (slow quorum)
 
-	proposeChan, preAcceptChan, preAcceptReplyChan chan fastrpc.Serializable
-	acceptChan, acceptReplyChan, commitChan        chan fastrpc.Serializable
-	inquireChan, execResultChan, dummyChan         chan fastrpc.Serializable
-	preAcceptRPC, preAcceptReplyRPC, acceptRPC     uint8
-	acceptReplyRPC, commitRPC, inquireRPC          uint8
-	execResultRPC                                  uint8
+	preAcceptChan, preAcceptReplyChan          chan fastrpc.Serializable
+	acceptChan, acceptReplyChan, commitChan    chan fastrpc.Serializable
+	inquireChan, execResultChan                chan fastrpc.Serializable
+	preAcceptRPC, preAcceptReplyRPC, acceptRPC uint8
+	acceptReplyRPC, commitRPC, inquireRPC      uint8
+	execResultRPC                              uint8
 
 	nodes   map[TxnId]*Node
 	keys    map[state.Key]*keyDeps
@@ -185,9 +185,9 @@ func New(alias string, id int, peerAddrList []string, shardSize int, conf *confi
 		maj:     lay.Majority(),
 		members: lay.Replicas(lay.ShardOfReplica(int32(id))),
 
-		proposeChan: mk(), preAcceptChan: mk(), preAcceptReplyChan: mk(),
+		preAcceptChan: mk(), preAcceptReplyChan: mk(),
 		acceptChan: mk(), acceptReplyChan: mk(), commitChan: mk(),
-		inquireChan: mk(), execResultChan: mk(), dummyChan: mk(),
+		inquireChan: mk(), execResultChan: mk(),
 
 		nodes:   make(map[TxnId]*Node),
 		keys:    make(map[state.Key]*keyDeps),
@@ -195,13 +195,6 @@ func New(alias string, id int, peerAddrList []string, shardSize int, conf *confi
 		coords:  make(map[TxnId]*coordState),
 
 		inquirers: make(map[TxnId][]int32),
-	}
-	// the first two codes are shared with clients
-	if c := r.RPC.Register(new(TxnPropose), r.proposeChan); c != TxnProposeCode {
-		panic("janus: unexpected rpc code")
-	}
-	if c := r.RPC.Register(new(TxnReply), r.dummyChan); c != TxnReplyCode {
-		panic("janus: unexpected rpc code")
 	}
 	r.preAcceptRPC = r.RPC.Register(new(PreAccept), r.preAcceptChan)
 	r.preAcceptReplyRPC = r.RPC.Register(new(PreAcceptReply), r.preAcceptReplyChan)
@@ -225,8 +218,8 @@ func (r *Replica) run() {
 	tick := time.NewTicker(tickPeriod)
 	for !r.Shutdown {
 		select {
-		case m := <-r.proposeChan:
-			r.handlePropose(m.(*TxnPropose))
+		case m := <-r.ProposeChan:
+			r.handlePropose(m)
 		case m := <-r.preAcceptChan:
 			r.handlePreAccept(m.(*PreAccept))
 		case m := <-r.preAcceptReplyChan:
@@ -365,8 +358,20 @@ func (r *Replica) computeDeps(id TxnId, local []state.Command) []Dep {
 	}
 	for i := range local {
 		c := &local[i]
-		switch c.Op {
-		case state.PUT:
+		switch {
+		case c.Op == state.SCAN: // reads the keys of its range
+			lo, hi := scanRange(c)
+			for k, kd := range r.keys {
+				if k < lo || k > hi {
+					continue
+				}
+				for j := range kd.ents {
+					if kd.ents[j].write {
+						add(&kd.ents[j].dep)
+					}
+				}
+			}
+		case state.IsWrite(c.Op):
 			if kd := r.keys[c.K]; kd != nil {
 				for j := range kd.ents {
 					add(&kd.ents[j].dep)
@@ -377,20 +382,8 @@ func (r *Replica) computeDeps(id TxnId, local []state.Command) []Dep {
 					add(&r.scans[j].dep)
 				}
 			}
-		case state.GET:
+		default: // read
 			if kd := r.keys[c.K]; kd != nil {
-				for j := range kd.ents {
-					if kd.ents[j].write {
-						add(&kd.ents[j].dep)
-					}
-				}
-			}
-		case state.SCAN:
-			lo, hi := scanRange(c)
-			for k, kd := range r.keys {
-				if k < lo || k > hi {
-					continue
-				}
 				for j := range kd.ents {
 					if kd.ents[j].write {
 						add(&kd.ents[j].dep)
@@ -427,7 +420,7 @@ func (r *Replica) record(n *Node) {
 			kd = &keyDeps{}
 			r.keys[c.K] = kd
 		}
-		kd.ents = append(kd.ents, fent{self, c.Op == state.PUT})
+		kd.ents = append(kd.ents, fent{self, state.IsWrite(c.Op)})
 	}
 }
 
@@ -442,7 +435,7 @@ func (r *Replica) cover(n *Node) {
 		deps[d.Id] = struct{}{}
 	}
 	for _, c := range r.localCmds(n.Cmds) {
-		if c.Op != state.PUT {
+		if !state.IsWrite(c.Op) {
 			continue
 		}
 		kd := r.keys[c.K]
@@ -468,21 +461,45 @@ func (r *Replica) cover(n *Node) {
 
 // ---- coordinator ----
 
-func (r *Replica) handlePropose(m *TxnPropose) {
-	id := TxnId{r.Id, r.next}
-	r.next++
-	ss := r.lay.ShardsOf(m.Cmds)
-	if len(ss) == 0 {
-		r.SendClientMsg(m.ClientId, TxnReplyCode, &TxnReply{CommandId: m.CommandId})
-		return
+// txnOf returns the commands of a client command: those of a TXN command (nil
+// if it is malformed), or the command itself.
+func txnOf(c *state.Command) (cmds []state.Command, txn bool) {
+	switch c.Op {
+	case state.NONE:
+		return nil, false
+	case state.TXN:
+		cmds, err := state.DecodeTxn(c.V)
+		if err != nil {
+			return nil, true
+		}
+		for i := range cmds {
+			if cmds[i].Op == state.NONE || cmds[i].Op == state.TXN {
+				return nil, true
+			}
+		}
+		return cmds, true
 	}
+	return []state.Command{*c}, false
+}
+
+func (r *Replica) handlePropose(m *defs.GPropose) {
+	cmds, txn := txnOf(&m.Command)
 	cs := &coordState{
-		propose: m,
-		shards:  ss,
+		client:  m,
+		txn:     txn,
+		cmds:    cmds,
+		shards:  r.lay.ShardsOf(cmds),
 		sh:      make(map[int]*shardState),
 		start:   time.Now(),
 		results: make(map[int][][]byte),
 	}
+	ss := cs.shards
+	if len(ss) == 0 {
+		r.reply(cs, make([][]byte, len(cmds)))
+		return
+	}
+	id := TxnId{r.Id, r.next}
+	r.next++
 	r.coords[id] = cs
 	mask := shardMask(ss)
 	for _, s := range ss {
@@ -502,11 +519,11 @@ func (r *Replica) handlePropose(m *TxnPropose) {
 
 func (r *Replica) sendPreAccept(id TxnId, cs *coordState, mask uint64, p int32) {
 	if p == r.Id {
-		deps, _ := r.preAcceptLocal(id, mask, cs.propose.Cmds)
+		deps, _ := r.preAcceptLocal(id, mask, cs.cmds)
 		cs.sh[r.shard].replies[r.Id] = deps
 		return
 	}
-	r.SendMsg(p, r.preAcceptRPC, &PreAccept{Id: id, Shards: mask, Cmds: cs.propose.Cmds})
+	r.SendMsg(p, r.preAcceptRPC, &PreAccept{Id: id, Shards: mask, Cmds: cs.cmds})
 }
 
 // checkPreAccepted implements Algorithm 1, lines 4-11. The fast quorum of a
@@ -555,12 +572,12 @@ func (r *Replica) checkPreAccepted(id TxnId, cs *coordState) {
 		sh := cs.sh[s]
 		for _, p := range r.lay.Replicas(s) {
 			if p == r.Id {
-				if r.acceptLocal(id, 0, mask, cs.propose.Cmds, cs.final) {
+				if r.acceptLocal(id, 0, mask, cs.cmds, cs.final) {
 					sh.accepts[p] = true
 				}
 				continue
 			}
-			r.SendMsg(p, r.acceptRPC, &Accept{Id: id, Ballot: 0, Shards: mask, Cmds: cs.propose.Cmds, Deps: cs.final})
+			r.SendMsg(p, r.acceptRPC, &Accept{Id: id, Ballot: 0, Shards: mask, Cmds: cs.cmds, Deps: cs.final})
 		}
 	}
 	r.checkAccepted(id, cs)
@@ -582,7 +599,7 @@ func (r *Replica) checkAccepted(id TxnId, cs *coordState) {
 func (r *Replica) commit(id TxnId, cs *coordState) {
 	cs.phase = 2
 	mask := shardMask(cs.shards)
-	cm := &Commit{Id: id, Shards: mask, Cmds: cs.propose.Cmds, Deps: cs.final}
+	cm := &Commit{Id: id, Shards: mask, Cmds: cs.cmds, Deps: cs.final}
 	local := false
 	for _, s := range cs.shards {
 		for _, p := range r.lay.Replicas(s) {
@@ -637,7 +654,7 @@ func (r *Replica) handleExecResult(m *ExecResult) {
 	if len(cs.results) < len(cs.shards) {
 		return
 	}
-	cmds := cs.propose.Cmds
+	cmds := cs.cmds
 	vals := make([][]byte, len(cmds))
 	for i := range cmds {
 		if cmds[i].Op == state.SCAN {
@@ -651,7 +668,30 @@ func (r *Replica) handleExecResult(m *ExecResult) {
 		}
 	}
 	delete(r.coords, m.Id)
-	r.SendClientMsg(cs.propose.ClientId, TxnReplyCode, &TxnReply{CommandId: cs.propose.CommandId, Vals: vals})
+	r.reply(cs, vals)
+}
+
+// reply answers the client of a transaction.
+func (r *Replica) reply(cs *coordState, vals [][]byte) {
+	var v state.Value
+	if cs.txn {
+		vs := make([]state.Value, len(vals))
+		for i := range vals {
+			vs[i] = vals[i]
+		}
+		v = state.EncodeValues(vs)
+	} else if len(vals) > 0 {
+		v = vals[0]
+	}
+	if v == nil {
+		v = state.NIL()
+	}
+	r.ReplyProposeTS(&defs.ProposeReplyTS{
+		OK:        defs.TRUE,
+		CommandId: cs.client.CommandId,
+		Value:     v,
+		Timestamp: cs.client.Timestamp,
+	}, cs.client.Reply, cs.client.Mutex)
 }
 
 // ---- replica side ----
